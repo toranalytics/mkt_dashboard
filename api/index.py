@@ -3,7 +3,7 @@ import requests
 import json
 import os
 import traceback
-import pandas as pd  # fetch_and_format_facebook_ads_data 함수에서 사용하기 위해 추가
+import pandas as pd  # pandas 모듈 추가
 
 app = Flask(__name__)
 
@@ -63,8 +63,9 @@ def generate_report():
         print(f"An unexpected error occurred: {str(e)}\nDetails:\n{error_details}")
         return jsonify({"error": "An internal server error occurred while generating the report."}), 500
 
+
 # --------------------------------------------------------------------------------
-# fetch_and_format_facebook_ads_data 함수 구현
+# fetch_and_format_facebook_ads_data 함수 구현 (수정됨)
 # --------------------------------------------------------------------------------
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
@@ -144,12 +145,20 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             df[col] = pd.to_numeric(df[col])
     
     # CTR 계산 (clicks / impressions * 100)
+    # 노출 수가 0인 경우 "0%"로 처리
     if 'clicks' in df.columns and 'impressions' in df.columns:
-        df['ctr'] = (df['clicks'] / df['impressions'] * 100).round(2).astype(str) + '%'
+        df['ctr'] = df.apply(
+            lambda r: f"{round(r['clicks']/r['impressions']*100,2)}%" if r['impressions'] > 0 else "0%",
+            axis=1
+        )
     
     # CPC 계산 (spend / clicks)
+    # 클릭 수가 0인 경우 0으로 처리하여 Infinity 방지
     if 'spend' in df.columns and 'clicks' in df.columns:
-        df['cpc'] = (df['spend'] / df['clicks']).round(2)
+        df['cpc'] = df.apply(
+            lambda r: round(r['spend']/r['clicks'], 2) if r['clicks'] > 0 else 0,
+            axis=1
+        )
     
     # 컬럼명 한글화
     df = df.rename(columns={
@@ -196,56 +205,4 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     html_table = """
     <style>
     table {border-collapse: collapse; width: 100%;}
-    th, td {padding: 8px; text-align: left; border-bottom: 1px solid #ddd;}
-    th {background-color: #f2f2f2;}
-    tr:hover {background-color: #f5f5f5;}
-    .total-row {background-color: #e6f2ff; font-weight: bold;}
-    .high-performance {color: #ff9900; font-weight: bold;}
-    .winning-content {color: #009900; font-weight: bold;}
-    </style>
-    <table>
-    <tr>
-        <th>광고명</th>
-        <th>캠페인명</th>
-        <th>광고세트명</th>
-        <th>FB 광고비용</th>
-        <th>노출</th>
-        <th>Click</th>
-        <th>CTR</th>
-        <th>CPC</th>
-        <th>광고 성과</th>
-        <th>광고 이미지</th>
-    </tr>
-    """
-    for _, row in df_sorted.iterrows():
-        row_class = 'total-row' if row['광고명'] == '합계' else ''
-        performance_text = row.get('광고 성과', '')
-        performance_class = ''
-        if performance_text == '고성과':
-            performance_class = 'high-performance'
-        elif performance_text == '위닝콘텐츠':
-            performance_class = 'winning-content'
-        img_url = row.get("image_url", "")
-        img_tag = f'<img src="{img_url}" style="max-width:100px; max-height:100px;">' if pd.notna(img_url) and img_url != "" else ""
-        html_table += f"""
-        <tr class="{row_class}">
-            <td>{row.get('광고명', '')}</td>
-            <td>{row.get('캠페인명', '')}</td>
-            <td>{row.get('광고세트명', '')}</td>
-            <td>{row.get('FB 광고비용', 0):.2f}</td>
-            <td>{row.get('노출', 0):,}</td>
-            <td>{row.get('Click', 0):,}</td>
-            <td>{row.get('CTR', '0%')}</td>
-            <td>{row.get('CPC', 0):.2f}</td>
-            <td class="{performance_class}">{performance_text}</td>
-            <td>{img_tag}</td>
-        </tr>
-        """
-    html_table += "</table>"
-    
-    # API 응답용으로 HTML 테이블 문자열과 DataFrame 레코드 목록을 함께 반환
-    return {"html_table": html_table, "data": df_sorted.to_dict(orient='records')}
-
-# Flask 앱 실행 (로컬 테스트용, Vercel에서는 필요 없음)
-# if __name__ == '__main__':
-#    app.run(debug=True)
+    th, td {padding: 8px; text-align: left; border-bottom: 1px
