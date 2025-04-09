@@ -1,9 +1,5 @@
 [build]
   functions = "netlify/functions"
-  command = ""
 
 [functions]
-  included_files = ["netlify/functions/requirements.txt"]
-
-  [functions.runtime]
-    external_node_modules = []
+  included_files = ["netlify/functions/get_facebook_ads_report.py"]
