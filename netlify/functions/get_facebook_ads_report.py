@@ -24,24 +24,31 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     data = response.json()
     records = data.get('data', [])
     
-    # Process the data as needed (simplified here for brevity)
+    # Process the data (simplified here for brevity)
     results = [{"ad_id": record.get("ad_id"), "spend": record.get("spend")} for record in records]
     
     return results
 
 if __name__ == "__main__":
-    # Get arguments from command line
-    start_date = sys.argv[1]
-    end_date = sys.argv[2]
+    try:
+        # 명령줄 인자로 받은 시작 날짜와 종료 날짜
+        start_date = sys.argv[1]
+        end_date = sys.argv[2]
 
-    # Environment variables
-    ver = "v19.0"
-    account = os.environ.get("FACEBOOK_ACCOUNT_ID")
-    token = os.environ.get("FACEBOOK_ACCESS_TOKEN")
+        # 환경 변수에서 Facebook 계정 ID와 액세스 토큰 가져오기
+        ver = "v19.0"
+        account = os.environ.get("FACEBOOK_ACCOUNT_ID")
+        token = os.environ.get("FACEBOOK_ACCESS_TOKEN")
 
-    if not account or not token:
-        print(json.dumps({"error": "Missing Facebook account ID or access token"}))
+        # 환경 변수 확인
+        if not account or not token:
+            print(json.dumps({"error": "Missing Facebook account ID or access token"}))
+            sys.exit(1)
+
+        # Facebook 광고 데이터를 가져오고 JSON 형식으로 출력
+        result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token)
+        print(json.dumps(result))
+    
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
         sys.exit(1)
-
-    result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token)
-    print(json.dumps(result))
