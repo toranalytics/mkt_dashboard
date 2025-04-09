@@ -1,9 +1,8 @@
 [build]
-  command = "pip install -r netlify/functions/requirements.txt"
   functions = "netlify/functions"
 
-[functions]
-  included_files = ["netlify/functions/*"]
+[build.environment]
+  PYTHON_VERSION = "3.9"  # 안정적인 Python 버전 사용
 
-  [functions.runtime]
-    external_node_modules = []
+[functions]
+  node_bundler = "esbuild"
