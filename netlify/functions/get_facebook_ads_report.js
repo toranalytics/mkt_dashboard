@@ -13,7 +13,7 @@ exports.handler = async (event) => {
       };
     }
 
-    const command = `python3 netlify/functions/get_facebook_ads_report.py ${startDate} ${endDate}`;
+    const command = `python3 ${__dirname}/get_facebook_ads_report.py ${startDate} ${endDate}`;
     
     return new Promise((resolve, reject) => {
       exec(command, (error, stdout, stderr) => {
