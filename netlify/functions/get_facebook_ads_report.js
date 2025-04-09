@@ -25,8 +25,7 @@ exports.handler = async (event) => {
           });
         } else {
           try {
-            // Python 스크립트의 출력이 JSON 형식인지 확인
-            const jsonOutput = JSON.parse(stdout);
+            const jsonOutput = JSON.parse(stdout); // Python 출력이 JSON 형식인지 확인
             resolve({
               statusCode: 200,
               body: JSON.stringify(jsonOutput),
