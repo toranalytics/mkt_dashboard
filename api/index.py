@@ -9,6 +9,7 @@ app = Flask(__name__)
 def home():
     return jsonify({"message": "Facebook 광고 성과 보고서 API가 실행 중입니다."})
 
+# 경로를 /api/generate-report로 변경
 @app.route('/api/generate-report', methods=['POST'])
 def generate_report():
     try:
@@ -30,6 +31,9 @@ def generate_report():
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# 나머지 함수 코드는 그대로 유지
+def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc'
