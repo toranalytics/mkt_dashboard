@@ -1,9 +1,9 @@
 [build]
+  command = "pip install -r netlify/functions/requirements.txt"
   functions = "netlify/functions"
-  command = "python -m pip install --upgrade pip && pip install -r netlify/functions/requirements.txt"
 
 [functions]
   included_files = ["netlify/functions/*"]
 
-[context.production.environment]
-  PYTHON_VERSION = "3.13"
+  [functions.runtime]
+    external_node_modules = []
