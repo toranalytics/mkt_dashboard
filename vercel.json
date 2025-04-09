@@ -21,18 +21,14 @@
       "use": "@vercel/static"
     }
   ],
-  "routes": [
+ "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/(.*\\.(js|css|html))",
-      "dest": "/$1"
+      "dest": "/api/index.py"
     },
     {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/$1"
     }
   ]
 }
