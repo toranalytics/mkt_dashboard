@@ -21,18 +21,29 @@ exports.handler = async (event) => {
           console.error(`Error: ${stderr}`);
           reject({
             statusCode: 500,
-            body: JSON.stringify({ error: "Failed to execute Python script" }),
+            body: JSON.stringify({ error: stderr }),
           });
         } else {
-          resolve({
-            statusCode: 200,
-            body: stdout,
-            headers: { "Content-Type": "application/json" },
-          });
+          try {
+            // Python 스크립트의 출력이 JSON 형식인지 확인
+            const jsonOutput = JSON.parse(stdout);
+            resolve({
+              statusCode: 200,
+              body: JSON.stringify(jsonOutput),
+              headers: { "Content-Type": "application/json" },
+            });
+          } catch (parseError) {
+            console.error(`Failed to parse Python output: ${stdout}`);
+            reject({
+              statusCode: 500,
+              body: JSON.stringify({ error: "Invalid JSON output from Python script" }),
+            });
+          }
         }
       });
     });
   } catch (err) {
+    console.error(`Unexpected error: ${err}`);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Internal server error" }),
