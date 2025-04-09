@@ -131,3 +131,58 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             '광고명': record.get('ad_name'),
             '캠페인명': record.get('campaign_name'),
             '광고세트명': record.get('adset_name'),
+            'FB 광고비용': spend,
+            '노출': impressions,
+            'Click': clicks,
+            'CTR': ctr,
+            'CPC': cpc,
+            'image_url': record.get('image_url'),
+            '광고 성과': ''  # 나중에 계산
+        })
+        
+        # 합계 계산
+        totals['FB 광고비용'] += spend
+        totals['노출'] += impressions
+        totals['Click'] += clicks
+    
+    # 평균 CTR 계산
+    avg_ctr = f"{((totals['Click'] / totals['노출']) * 100):.2f}%" if totals['노출'] > 0 else '0%'
+    
+    # 평균 CPC 계산
+    totals['CPC'] = totals['FB 광고비용'] / totals['Click'] if totals['Click'] > 0 else 0
+    
+    # 합계 행 추가
+    total_row = {
+        '광고명': '합계',
+        '캠페인명': '',
+        '광고세트명': '',
+        'FB 광고비용': totals['FB 광고비용'],
+        '노출': totals['노출'],
+        'Click': totals['Click'],
+        'CTR': avg_ctr,
+        'CPC': totals['CPC'],
+        'image_url': '',
+        '광고 성과': ''
+    }
+    
+    # 광고 성과 계산 및 정렬
+    for result in results:
+        if totals['Click'] > 0:
+            click_percentage = result['Click'] / totals['Click']
+            if click_percentage >= 0.5:
+                result['광고 성과'] = '위닝콘텐츠'
+            elif click_percentage >= 0.3:
+                result['광고 성과'] = '고성과'
+            else:
+                result['광고 성과'] = '-'
+    
+    # 클릭 수 기준으로 정렬
+    results.sort(key=lambda x: x['Click'], reverse=True)
+    
+    # 합계 행을 맨 앞에 추가
+    final_results = [total_row] + results
+    
+    return final_results
+
+if __name__ == '__main__':
+    app.run(debug=True)
