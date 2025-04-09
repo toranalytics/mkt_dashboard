@@ -34,8 +34,6 @@ def generate_report():
 
 # 나머지 함수 코드는 그대로 유지
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
-
-def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc'
     url = f"https://graph.facebook.com/{ver}/{account}/insights"
 
