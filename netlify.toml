@@ -1,8 +1,0 @@
-[build]
-  functions = "netlify/functions"
-
-[build.environment]
-  PYTHON_VERSION = "3.9"  # 안정적인 Python 버전 사용
-
-[functions]
-  node_bundler = "esbuild"
