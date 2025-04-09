@@ -17,7 +17,7 @@ def after_request(response):
 def home():
     return jsonify({"message": "Facebook 광고 성과 보고서 API가 실행 중입니다."})
 
-@app.route('/api/generate-report', methods=['POST', 'OPTIONS'])
+@app.route('/api/generate-report', methods=['POST'])
 def generate_report():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
