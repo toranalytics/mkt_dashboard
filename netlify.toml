@@ -1,5 +1,9 @@
 [build]
   functions = "netlify/functions"
+  command = "python -m pip install --upgrade pip && pip install -r netlify/functions/requirements.txt"
 
 [functions]
-  included_files = ["netlify/functions/get_facebook_ads_report.py"]
+  included_files = ["netlify/functions/*"]
+
+[context.production.environment]
+  PYTHON_VERSION = "3.13"
