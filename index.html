@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facebook 광고 성과 보고서</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Facebook 광고 성과 보고서</h1>
+        
+        <div class="form-group">
+            <label for="start-date">시작 날짜:</label>
+            <input type="date" id="start-date" value="2025-04-07">
+        </div>
+        
+        <div class="form-group">
+            <label for="end-date">종료 날짜:</label>
+            <input type="date" id="end-date" value="2025-04-09">
+        </div>
+        
+        <button onclick="generateReport()">보고서 생성</button>
+        
+        <div id="error-message"></div>
+        <div id="report-result"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
