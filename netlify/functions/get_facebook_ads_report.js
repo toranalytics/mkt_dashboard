@@ -1,4 +1,5 @@
 const { exec } = require("child_process");
+const path = require("path");
 
 exports.handler = async (event) => {
   try {
@@ -13,31 +14,33 @@ exports.handler = async (event) => {
       };
     }
 
-    const command = `python3 ${__dirname}/get_facebook_ads_report.py ${startDate} ${endDate}`;
+    // 절대 경로 사용
+    const scriptPath = path.join(__dirname, "get_facebook_ads_report.py");
+    const command = `python3 ${scriptPath} ${startDate} ${endDate}`;
     
     return new Promise((resolve, reject) => {
-      exec(command, (error, stdout, stderr) => {
+      exec(command, { env: process.env }, (error, stdout, stderr) => {
         if (error) {
           console.error(`Error: ${stderr}`);
-          reject({
+          return resolve({
             statusCode: 500,
-            body: JSON.stringify({ error: stderr }),
+            body: JSON.stringify({ error: stderr || "Script execution failed" }),
           });
-        } else {
-          try {
-            const jsonOutput = JSON.parse(stdout); // Python 출력이 JSON 형식인지 확인
-            resolve({
-              statusCode: 200,
-              body: JSON.stringify(jsonOutput),
-              headers: { "Content-Type": "application/json" },
-            });
-          } catch (parseError) {
-            console.error(`Failed to parse Python output: ${stdout}`);
-            reject({
-              statusCode: 500,
-              body: JSON.stringify({ error: "Invalid JSON output from Python script" }),
-            });
-          }
+        }
+        
+        try {
+          const jsonOutput = JSON.parse(stdout);
+          return resolve({
+            statusCode: 200,
+            body: JSON.stringify(jsonOutput),
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (parseError) {
+          console.error(`Failed to parse output: ${stdout}`);
+          return resolve({
+            statusCode: 500,
+            body: JSON.stringify({ error: "Invalid JSON output", stdout: stdout }),
+          });
         }
       });
     });
