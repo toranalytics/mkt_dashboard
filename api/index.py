@@ -31,7 +31,8 @@ def generate_report():
             return jsonify({"error": "시작 날짜와 종료 날짜를 모두 입력해주세요."}), 400
         
         # 환경 변수에서 Facebook 계정 ID와 액세스 토큰 가져오기
-       account = os.environ.get("FACEBOOK_ACCOUNT_ID")
+        ver = "v19.0"
+        account = os.environ.get("FACEBOOK_ACCOUNT_ID")
         token = os.environ.get("FACEBOOK_ACCESS_TOKEN")
 
         if not account or not token:
