@@ -2,9 +2,8 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import os
-# traceback 모듈은 except 블록 안에서 import 해도 괜찮지만, 
-# 파일 상단에 import하는 것이 더 일반적일 수 있습니다. (선택 사항)
-import traceback 
+import traceback
+import pandas as pd  # fetch_and_format_facebook_ads_data 함수에서 사용하기 위해 추가
 
 app = Flask(__name__)
 
@@ -35,60 +34,47 @@ def generate_report():
             return jsonify({"error": "시작 날짜와 종료 날짜를 모두 입력해주세요."}), 400
         
         # 환경 변수에서 Facebook 계정 ID와 액세스 토큰 가져오기
-        ver = "v19.0" # Facebook API 버전
+        ver = "v19.0"  # Facebook API 버전
         account = os.environ.get("FACEBOOK_ACCOUNT_ID")
         token = os.environ.get("FACEBOOK_ACCESS_TOKEN")
 
         if not account or not token:
             print("Error: Facebook Account ID or Access Token not found in environment variables.")
-            # 환경 변수 누락 시 서버 설정 오류 반환
             return jsonify({"error": "Server configuration error: Missing Facebook credentials."}), 500
 
-        print(f"Attempting to fetch data for account: {account} from {start_date} to {end_date}") # 로깅 추가
+        print(f"Attempting to fetch data for account: {account} from {start_date} to {end_date}")
 
-        # ================================================================
-        # !!! 오류 발생 가능성이 높은 지점 !!!
-        # fetch_and_format_facebook_ads_data 함수가 정의되어 있어야 하고,
-        # 이 함수 내부에서 오류가 발생하지 않아야 합니다.
-        # 필요한 라이브러리(예: facebook_business)가 requirements.txt에 있어야 합니다.
-        # ================================================================
+        # fetch_and_format_facebook_ads_data 함수를 호출
         result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token) 
         
-        print("Successfully fetched and formatted data.") # 성공 로깅 추가
+        print("Successfully fetched and formatted data.")
         return jsonify(result)
 
-    except requests.exceptions.RequestException as req_err: # requests 라이브러리 관련 네트워크 오류 등 명시적 처리
+    except requests.exceptions.RequestException as req_err:
         print(f"Error during Facebook API request: {str(req_err)}")
         return jsonify({"error": f"API request failed: {str(req_err)}"}), 500
     
-    except KeyError as key_err: # Facebook API 응답 파싱 중 키 오류 등
+    except KeyError as key_err:
         print(f"Error processing API response (KeyError): {str(key_err)}")
         return jsonify({"error": f"Error processing API data: {str(key_err)}"}), 500
     
-    except Exception as e: # 그 외 예상치 못한 모든 오류 처리
-        # traceback 모듈을 사용하여 더 자세한 오류 정보 로깅
+    except Exception as e:
         error_details = traceback.format_exc()
         print(f"An unexpected error occurred: {str(e)}\nDetails:\n{error_details}")
-        # 사용자에게는 간단한 내부 서버 오류 메시지 전달
         return jsonify({"error": "An internal server error occurred while generating the report."}), 500
 
-# ================================================================
-# !!! 중요 !!!
-# 아래 함수는 실제 구현이 필요합니다. 이 파일 또는 다른 파일에 정의되어야 합니다.
-# 예시 이름이며, 실제 프로젝트의 함수 이름과 일치해야 합니다.
-# ================================================================
+# --------------------------------------------------------------------------------
+# fetch_and_format_facebook_ads_data 함수 구현
+# --------------------------------------------------------------------------------
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
-    import requests
-    import pandas as pd
-
     # 1단계: 광고 성과 데이터 가져오기 (캠페인명과 광고세트명 포함)
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
     params = {
         'fields': metrics,
         'access_token': token,
-        'level': 'ad',  # 광고 수준으로 설정
+        'level': 'ad',
         'time_range[since]': start_date,
         'time_range[until]': end_date,
         'use_unified_attribution_setting': 'true'
@@ -202,7 +188,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     
     df_with_total['광고 성과'] = df_with_total.apply(categorize_performance, axis=1)
     
-    # 정렬: 합계 행은 항상 상단, 그 외는 클릭 수 내림차순
+    # 정렬: 합계 행은 항상 상단, 그 외는 클릭 수 내림차순 정렬
     df_with_total['sort_key'] = df_with_total['광고명'].apply(lambda x: 0 if x == '합계' else 1)
     df_sorted = df_with_total.sort_values(by=['sort_key', 'Click'], ascending=[True, False]).drop('sort_key', axis=1)
     
@@ -259,7 +245,6 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     
     # API 응답용으로 HTML 테이블 문자열과 DataFrame 레코드 목록을 함께 반환
     return {"html_table": html_table, "data": df_sorted.to_dict(orient='records')}
-
 
 # Flask 앱 실행 (로컬 테스트용, Vercel에서는 필요 없음)
 # if __name__ == '__main__':
