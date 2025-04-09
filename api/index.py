@@ -1,12 +1,11 @@
 from flask import Flask, request, jsonify
 import requests
 import json
-import pandas as pd
 import os
 
 app = Flask(__name__)
 
-@app.route('/api', methods=['GET'])
+@app.route('/', methods=['GET'])
 def home():
     return jsonify({"message": "Facebook 광고 성과 보고서 API가 실행 중입니다."})
 
@@ -106,73 +105,29 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         
         ad_data[ad_id]['image_url'] = image_url
     
-    # DataFrame 생성 및 결과 처리
-    result_list = list(ad_data.values())
-    df = pd.DataFrame(result_list)
-    
-    # 숫자형 컬럼 변환
-    numeric_columns = ['spend', 'impressions', 'clicks']
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col])
-    
-    # CTR 계산 (clicks / impressions * 100)
-    if 'clicks' in df.columns and 'impressions' in df.columns:
-        df['ctr'] = (df['clicks'] / df['impressions'] * 100).round(2).astype(str) + '%'
-    
-    # CPC 계산 (spend / clicks)
-    if 'spend' in df.columns and 'clicks' in df.columns:
-        df['cpc'] = (df['spend'] / df['clicks']).round(2)
-    
-    # 컬럼 이름 변경
-    df = df.rename(columns={
-        'ad_name': '광고명',
-        'campaign_name': '캠페인명',
-        'adset_name': '광고세트명',
-        'spend': 'FB 광고비용',
-        'impressions': '노출',
-        'clicks': 'Click',
-        'ctr': 'CTR',
-        'cpc': 'CPC'
-    })
-    
-    # 합계 계산
-    numeric_columns = ['FB 광고비용', '노출', 'Click', 'CPC']
-    totals = df[numeric_columns].sum()
-    avg_ctr = (totals['Click'] / totals['노출'] * 100).round(2) if totals['노출'] > 0 else 0
-    
-    # 결과를 JSON으로 변환하기 위한 처리
-    df_dict = df.to_dict('records')
-    
-    # 합계 행 추가
-    totals_dict = {
-        '광고명': '합계',
-        '캠페인명': '',
-        '광고세트명': '',
-        'FB 광고비용': float(totals['FB 광고비용']),
-        '노출': int(totals['노출']),
-        'Click': int(totals['Click']),
-        'CTR': f"{avg_ctr}%",
-        'CPC': float(totals['CPC']),
-        'image_url': '',
-        '광고 성과': ''
+    # 결과 처리 (pandas 사용하지 않고 직접 계산)
+    results = []
+    totals = {
+        'FB 광고비용': 0.0,
+        '노출': 0,
+        'Click': 0,
+        'CPC': 0.0
     }
     
-    # 최종 결과 생성 (합계 행을 첫 번째로)
-    final_results = [totals_dict] + df_dict
-    
-    # 광고 성과 추가
-    for item in final_results:
-        if item['광고명'] != '합계':
-            click_percentage = item['Click'] / totals['Click'] if totals['Click'] > 0 else 0
-            if click_percentage >= 0.5:
-                item['광고 성과'] = '위닝콘텐츠'
-            elif click_percentage >= 0.3:
-                item['광고 성과'] = '고성과'
-            else:
-                item['광고 성과'] = '-'
-    
-    return final_results
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    # 각 광고 데이터 처리
+    for ad_id, record in ad_data.items():
+        spend = float(record.get('spend', '0'))
+        impressions = int(float(record.get('impressions', '0')))
+        clicks = int(float(record.get('clicks', '0')))
+        
+        # CTR 계산
+        ctr = f"{((clicks / impressions) * 100):.2f}%" if impressions > 0 else '0%'
+        
+        # CPC 계산
+        cpc = (spend / clicks) if clicks > 0 else 0
+        
+        # 결과 추가
+        results.append({
+            '광고명': record.get('ad_name'),
+            '캠페인명': record.get('campaign_name'),
+            '광고세트명': record.get('adset_name'),
