@@ -4,4 +4,6 @@
 
 [functions]
   included_files = ["netlify/functions/requirements.txt"]
-  runtime = "python3.x"
+
+  [functions.runtime]
+    external_node_modules = []
