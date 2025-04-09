@@ -4,8 +4,9 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "env": {
-        "PYTHON_VERSION": "3.9"
+      "config": {
+        "runtime": "python3.9"
+      }
     }
   ],
   "routes": [
