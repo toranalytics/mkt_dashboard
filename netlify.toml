@@ -4,4 +4,4 @@
 
 [functions]
   included_files = ["netlify/functions/requirements.txt"]
-  runtime = "python3" # 또는 "python3.x" 로 시도해 보세요.
+  runtime = "python3.x"
