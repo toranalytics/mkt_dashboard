@@ -24,15 +24,15 @@ def generate_report():
     if request.method == 'OPTIONS':
         # Preflight 요청 처리
         return jsonify({}), 200
-        
+
     try:
         data = request.get_json()
         start_date = data.get('start_date')
         end_date = data.get('end_date')
-        
+
         if not start_date or not end_date:
             return jsonify({"error": "시작 날짜와 종료 날짜를 모두 입력해주세요."}), 400
-        
+
         # 환경 변수에서 Facebook 계정 ID와 액세스 토큰 가져오기
         ver = "v19.0"  # Facebook API 버전
         account = os.environ.get("FACEBOOK_ACCOUNT_ID")
@@ -45,19 +45,19 @@ def generate_report():
         print(f"Attempting to fetch data for account: {account} from {start_date} to {end_date}")
 
         # fetch_and_format_facebook_ads_data 함수를 호출
-        result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token) 
-        
+        result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token)
+
         print("Successfully fetched and formatted data.")
         return jsonify(result)
 
     except requests.exceptions.RequestException as req_err:
         print(f"Error during Facebook API request: {str(req_err)}")
         return jsonify({"error": f"API request failed: {str(req_err)}"}), 500
-    
+
     except KeyError as key_err:
         print(f"Error processing API response (KeyError): {str(key_err)}")
         return jsonify({"error": f"Error processing API data: {str(key_err)}"}), 500
-    
+
     except Exception as e:
         error_details = traceback.format_exc()
         print(f"An unexpected error occurred: {str(e)}\nDetails:\n{error_details}")
@@ -70,7 +70,8 @@ def generate_report():
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     # 1단계: 광고 성과 데이터 가져오기 (캠페인명과 광고세트명 포함)
-    metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc'
+    # actions 필드를 추가하여 링크 클릭 데이터를 포함합니다.
+    metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
     params = {
         'fields': metrics,
@@ -80,28 +81,41 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'time_range[until]': end_date,
         'use_unified_attribution_setting': 'true'
     }
-    
+
     response = requests.get(url=insights_url, params=params)
     ad_data = {}
     if response.status_code != 200:
         raise Exception(f"성과 데이터 불러오기 오류: {response.text}")
-    
+
     data = response.json()
     records = data.get('data', [])
-    # 광고 ID별로 데이터를 집계
+    # 각 레코드에서 링크 클릭(link_click) 수를 추출하여 새로운 키에 저장
     for record in records:
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
+
+        # 기본적으로 "actions" 내에서 "link_click"을 찾아 합산합니다.
+        link_clicks = 0
+        if 'actions' in record and isinstance(record['actions'], list):
+            for action in record['actions']:
+                if action.get("action_type") == "link_click":
+                    try:
+                        link_clicks += int(action.get("value", 0))
+                    except ValueError:
+                        link_clicks += 0
+        record["link_clicks"] = link_clicks
+
+        # 광고 ID별로 데이터를 집계 (동일 ad_id가 있으면 수치 합산)
         if ad_id not in ad_data:
             ad_data[ad_id] = record
         else:
-            for key in ['spend', 'impressions', 'clicks']:
+            for key in ['spend', 'impressions', 'link_clicks']:
                 if key in record:
                     ad_data[ad_id][key] = str(
                         float(ad_data[ad_id].get(key, '0')) + float(record.get(key, '0'))
                     )
-    
+
     # 2단계: 각 광고의 크리에이티브를 조회하여 이미지 URL 가져오기
     for ad_id in ad_data:
         creative_url = f"https://graph.facebook.com/{ver}/{ad_id}"
@@ -137,41 +151,41 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # 3단계: DataFrame 생성 및 데이터 가공
     result_list = list(ad_data.values())
     df = pd.DataFrame(result_list)
-    
-    # 숫자형 컬럼으로 변환
-    numeric_columns = ['spend', 'impressions', 'clicks']
+
+    # 숫자형 컬럼으로 변환 (spend, impressions, 그리고 link_clicks 사용)
+    numeric_columns = ['spend', 'impressions', 'link_clicks']
     for col in numeric_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col])
-    
-    # CTR 계산 (clicks / impressions * 100)
-    # 노출 수가 0인 경우 "0%"로 처리
-    if 'clicks' in df.columns and 'impressions' in df.columns:
+
+    # CTR 계산 (link_clicks / impressions * 100)
+    # 노출(impressions)이 0인 경우 "0%"로 처리
+    if 'link_clicks' in df.columns and 'impressions' in df.columns:
         df['ctr'] = df.apply(
-            lambda r: f"{round(r['clicks']/r['impressions']*100,2)}%" if r['impressions'] > 0 else "0%",
+            lambda r: f"{round(r['link_clicks']/r['impressions']*100,2)}%" if r['impressions'] > 0 else "0%",
             axis=1
         )
-    
-    # CPC 계산 (spend / clicks)
-    # 클릭 수가 0인 경우 0으로 처리하여 Infinity 방지
-    if 'spend' in df.columns and 'clicks' in df.columns:
+
+    # CPC 계산 (spend / link_clicks)
+    # 링크 클릭 수(link_clicks)가 0인 경우 0으로 처리하여 Infinity 방지
+    if 'spend' in df.columns and 'link_clicks' in df.columns:
         df['cpc'] = df.apply(
-            lambda r: round(r['spend']/r['clicks'], 2) if r['clicks'] > 0 else 0,
+            lambda r: round(r['spend']/r['link_clicks'], 2) if r['link_clicks'] > 0 else 0,
             axis=1
         )
-    
-    # 컬럼명 한글화
+
+    # 컬럼명 한글화 (여기서 'link_clicks'를 'Click'으로 표기하여 Ads Manager와 유사하게 표시)
     df = df.rename(columns={
         'ad_name': '광고명',
         'campaign_name': '캠페인명',
         'adset_name': '광고세트명',
         'spend': 'FB 광고비용',
         'impressions': '노출',
-        'clicks': 'Click',
+        'link_clicks': 'Click',   # link_clicks를 실제 클릭수로 사용
         'ctr': 'CTR',
         'cpc': 'CPC'
     })
-    
+
     # 합계 행 계산
     numeric_columns = ['FB 광고비용', '노출', 'Click', 'CPC']
     totals = df[numeric_columns].sum()
@@ -181,7 +195,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         index=['광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', 'image_url']
     )
     df_with_total = pd.concat([pd.DataFrame([totals_row]), df], ignore_index=True)
-    
+
     # 광고 성과 컬럼 추가: 클릭 비율에 따라 '위닝콘텐츠', '고성과' 등을 분류
     def categorize_performance(row):
         if row['광고명'] == '합계' or pd.isna(row['Click']):
@@ -194,14 +208,14 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             return '고성과'
         else:
             return '-'
-    
+
     df_with_total['광고 성과'] = df_with_total.apply(categorize_performance, axis=1)
-    
+
     # 정렬: 합계 행은 항상 상단, 그 외는 클릭 수 내림차순 정렬
     df_with_total['sort_key'] = df_with_total['광고명'].apply(lambda x: 0 if x == '합계' else 1)
     df_sorted = df_with_total.sort_values(by=['sort_key', 'Click'], ascending=[True, False]).drop('sort_key', axis=1)
-    
-   # 4단계: HTML 테이블 문자열 생성
+
+    # 4단계: HTML 테이블 문자열 생성
     html_table = """
     <style>
     table {border-collapse: collapse; width: 100%;}
@@ -251,8 +265,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         </tr>
         """
     html_table += "</table>"
-    
-    # 유틸리티 함수 추가 (파일 상단이나 이 함수 내에 정의)
+
+    # 유틸리티 함수: Infinity, NaN 값 클리닝 (JSON 직렬화 문제 방지)
     import math
     def clean_numeric(data):
         if isinstance(data, dict):
@@ -266,5 +280,5 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
 
     records = df_sorted.to_dict(orient='records')
     cleaned_records = clean_numeric(records)
-    
+
     return {"html_table": html_table, "data": cleaned_records}
