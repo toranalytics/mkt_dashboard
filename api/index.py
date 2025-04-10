@@ -4,6 +4,8 @@ import json
 import os
 import traceback
 import pandas as pd  # pandas 모듈 추가
+import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 
@@ -65,7 +67,64 @@ def generate_report():
 
 
 # --------------------------------------------------------------------------------
-# fetch_and_format_facebook_ads_data 함수 구현 (수정됨)
+# 크리에이티브 이미지 URL 가져오기 함수 (병렬 처리를 위해 별도 함수로 분리)
+# --------------------------------------------------------------------------------
+
+def get_creative_image_url(ad_id, ver, token):
+    """
+    주어진 광고 ID에 대해 크리에이티브 정보를 조회하고, 해당 크리에이티브의 이미지 URL을 반환합니다.
+    실패 시 빈 문자열("") 반환.
+    """
+    creative_url = f"https://graph.facebook.com/{ver}/{ad_id}"
+    creative_params = {
+        'fields': 'creative',
+        'access_token': token
+    }
+    creative_response = requests.get(url=creative_url, params=creative_params)
+    if creative_response.status_code == 200:
+        creative_data = creative_response.json()
+        creative_id = creative_data.get('creative', {}).get('id')
+        if creative_id:
+            image_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
+            image_params = {
+                'fields': 'image_url,thumbnail_url,object_story_spec',
+                'access_token': token
+            }
+            image_response = requests.get(url=image_req_url, params=image_params)
+            if image_response.status_code == 200:
+                image_data = image_response.json()
+                image_url = image_data.get('image_url')
+                if not image_url and 'object_story_spec' in image_data:
+                    story_spec = image_data.get('object_story_spec', {})
+                    if 'photo_data' in story_spec:
+                        image_url = story_spec.get('photo_data', {}).get('image_url')
+                    elif 'link_data' in story_spec and 'image_url' in story_spec.get('link_data', {}):
+                        image_url = story_spec.get('link_data', {}).get('image_url')
+                if not image_url:
+                    image_url = image_data.get('thumbnail_url')
+                return image_url
+    return ""  # 실패 시 빈 문자열 반환
+
+
+def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
+    """
+    광고 데이터 딕셔너리의 각 ad_id에 대해 크리에이티브 이미지 URL을 병렬 요청으로 가져와 업데이트합니다.
+    """
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for ad_id in ad_data.keys():
+            futures[executor.submit(get_creative_image_url, ad_id, ver, token)] = ad_id
+        for future in as_completed(futures):
+            ad_id = futures[future]
+            try:
+                img_url = future.result()
+            except Exception as e:
+                img_url = ""
+            ad_data[ad_id]['image_url'] = img_url
+
+
+# --------------------------------------------------------------------------------
+# fetch_and_format_facebook_ads_data 함수 구현 (수정됨: 크리에이티브 부분 병렬 처리 적용)
 # --------------------------------------------------------------------------------
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
@@ -116,37 +175,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                         float(ad_data[ad_id].get(key, '0')) + float(record.get(key, '0'))
                     )
 
-    # 2단계: 각 광고의 크리에이티브를 조회하여 이미지 URL 가져오기
-    for ad_id in ad_data:
-        creative_url = f"https://graph.facebook.com/{ver}/{ad_id}"
-        creative_params = {
-            'fields': 'creative',
-            'access_token': token
-        }
-        creative_response = requests.get(url=creative_url, params=creative_params)
-        if creative_response.status_code == 200:
-            creative_data = creative_response.json()
-            creative_id = creative_data.get('creative', {}).get('id')
-            if creative_id:
-                image_url = None
-                image_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-                image_params = {
-                    'fields': 'image_url,thumbnail_url,object_story_spec',
-                    'access_token': token
-                }
-                image_response = requests.get(url=image_req_url, params=image_params)
-                if image_response.status_code == 200:
-                    image_data = image_response.json()
-                    image_url = image_data.get('image_url')
-                    if not image_url and 'object_story_spec' in image_data:
-                        story_spec = image_data.get('object_story_spec', {})
-                        if 'photo_data' in story_spec:
-                            image_url = story_spec.get('photo_data', {}).get('image_url')
-                        elif 'link_data' in story_spec and 'image_url' in story_spec.get('link_data', {}):
-                            image_url = story_spec.get('link_data', {}).get('image_url')
-                    if not image_url:
-                        image_url = image_data.get('thumbnail_url')
-                    ad_data[ad_id]['image_url'] = image_url
+    # 2단계: 각 광고의 크리에이티브 이미지 URL 가져오기 (병렬 처리 적용)
+    fetch_creatives_parallel(ad_data, ver, token, max_workers=10)
 
     # 3단계: DataFrame 생성 및 데이터 가공
     result_list = list(ad_data.values())
@@ -181,7 +211,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'adset_name': '광고세트명',
         'spend': 'FB 광고비용',
         'impressions': '노출',
-        'link_clicks': 'Click',   # link_clicks를 실제 클릭수로 사용
+        'link_clicks': 'Click',
         'ctr': 'CTR',
         'cpc': 'CPC'
     })
@@ -267,7 +297,6 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     html_table += "</table>"
 
     # 유틸리티 함수: Infinity, NaN 값 클리닝 (JSON 직렬화 문제 방지)
-    import math
     def clean_numeric(data):
         if isinstance(data, dict):
             return {k: clean_numeric(v) for k, v in data.items()}
@@ -282,3 +311,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     cleaned_records = clean_numeric(records)
 
     return {"html_table": html_table, "data": cleaned_records}
+
+# Flask 앱 실행 (로컬 테스트용, Vercel에서는 필요 없음)
+# if __name__ == '__main__':
+#    app.run(debug=True)
