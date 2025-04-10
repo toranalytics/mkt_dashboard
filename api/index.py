@@ -204,7 +204,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     total_spend = df['FB 광고비용'].sum()
     total_clicks = df['Click'].sum()
     total_impressions = df['노출'].sum()
-    total_ctr = round(total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+    total_ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions > 0 else 0.0
     total_cpc = round(total_spend / total_clicks) if total_clicks > 0 else 0
     totals_row = pd.Series(
         [
