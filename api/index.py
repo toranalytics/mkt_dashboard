@@ -240,7 +240,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # HTML 테이블 생성 시, 숫자 포매팅 함수들 정의
     def format_currency(amount):
         # 광고비용: 정수, 3자리마다 콤마, 끝에 "₩"
-        return f"{int(amount):,}₩"
+        return f"{int(amount):,} ₩"
     def format_number(num):
         return f"{int(num):,}"
 
