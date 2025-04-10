@@ -175,7 +175,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # CTR 계산 (링크 클릭 기준: 정수 퍼센트)
     if 'link_clicks' in df.columns and 'impressions' in df.columns:
         df['ctr'] = df.apply(
-            lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100)}%" if r['impressions'] > 0 else "0%",
+            lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100, 2)}%" if r['impressions'] > 0 else "0%",
             axis=1
         )
 
