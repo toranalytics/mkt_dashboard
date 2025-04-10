@@ -201,8 +201,70 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     df_with_total['sort_key'] = df_with_total['광고명'].apply(lambda x: 0 if x == '합계' else 1)
     df_sorted = df_with_total.sort_values(by=['sort_key', 'Click'], ascending=[True, False]).drop('sort_key', axis=1)
     
-    # 4단계: HTML 테이블 문자열 생성
+   # 4단계: HTML 테이블 문자열 생성
     html_table = """
     <style>
     table {border-collapse: collapse; width: 100%;}
-    th, td {padding: 8px; text-align: left; border-bottom: 1px
+    th, td {padding: 8px; text-align: left; border-bottom: 1px solid #ddd;}
+    th {background-color: #f2f2f2;}
+    tr:hover {background-color: #f5f5f5;}
+    .total-row {background-color: #e6f2ff; font-weight: bold;}
+    .high-performance {color: #ff9900; font-weight: bold;}
+    .winning-content {color: #009900; font-weight: bold;}
+    </style>
+    <table>
+    <tr>
+        <th>광고명</th>
+        <th>캠페인명</th>
+        <th>광고세트명</th>
+        <th>FB 광고비용</th>
+        <th>노출</th>
+        <th>Click</th>
+        <th>CTR</th>
+        <th>CPC</th>
+        <th>광고 성과</th>
+        <th>광고 이미지</th>
+    </tr>
+    """
+    for _, row in df_sorted.iterrows():
+        row_class = 'total-row' if row['광고명'] == '합계' else ''
+        performance_text = row.get('광고 성과', '')
+        performance_class = ''
+        if performance_text == '고성과':
+            performance_class = 'high-performance'
+        elif performance_text == '위닝콘텐츠':
+            performance_class = 'winning-content'
+        img_url = row.get("image_url", "")
+        img_tag = f'<img src="{img_url}" style="max-width:100px; max-height:100px;">' if pd.notna(img_url) and img_url != "" else ""
+        html_table += f"""
+        <tr class="{row_class}">
+            <td>{row.get('광고명', '')}</td>
+            <td>{row.get('캠페인명', '')}</td>
+            <td>{row.get('광고세트명', '')}</td>
+            <td>{row.get('FB 광고비용', 0):.2f}</td>
+            <td>{row.get('노출', 0):,}</td>
+            <td>{row.get('Click', 0):,}</td>
+            <td>{row.get('CTR', '0%')}</td>
+            <td>{row.get('CPC', 0):.2f}</td>
+            <td class="{performance_class}">{performance_text}</td>
+            <td>{img_tag}</td>
+        </tr>
+        """
+    html_table += "</table>"
+    
+    # 유틸리티 함수 추가 (파일 상단이나 이 함수 내에 정의)
+    import math
+    def clean_numeric(data):
+        if isinstance(data, dict):
+            return {k: clean_numeric(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [clean_numeric(item) for item in data]
+        elif isinstance(data, float):
+            if math.isinf(data) or math.isnan(data):
+                return 0
+        return data
+
+    records = df_sorted.to_dict(orient='records')
+    cleaned_records = clean_numeric(records)
+    
+    return {"html_table": html_table, "data": cleaned_records}
