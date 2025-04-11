@@ -10,7 +10,7 @@ function getDefaultDate() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// 페이지 로드 시, 날짜 입력란 기본값 설정
+// 페이지 로드 시, 날짜 입력란 기본값 설정.
 window.addEventListener('load', () => {
   const defaultDate = getDefaultDate();
   const startDateInput = document.getElementById('start-date');
