@@ -175,7 +175,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # CTR 계산 (링크 클릭 기준: 정수 퍼센트)
     if 'link_clicks' in df.columns and 'impressions' in df.columns:
         df['ctr'] = df.apply(
-            lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100, 2)}%" if r['impressions'] > 0 else "0%",
+            lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100)}%" if r['impressions'] > 0 else "0%",
             axis=1
         )
 
@@ -204,7 +204,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     total_spend = df['FB 광고비용'].sum()
     total_clicks = df['Click'].sum()
     total_impressions = df['노출'].sum()
-    total_ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions > 0 else 0.0
+    total_ctr = round(total_clicks / total_impressions * 100) if total_impressions > 0 else 0
     total_cpc = round(total_spend / total_clicks) if total_clicks > 0 else 0
     totals_row = pd.Series(
         [
@@ -240,7 +240,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # HTML 테이블 생성 시, 숫자 포매팅 함수들 정의
     def format_currency(amount):
         # 광고비용: 정수, 3자리마다 콤마, 끝에 "₩"
-        return f"{int(amount):,} ₩"
+        return f"{int(amount):,}₩"
     def format_number(num):
         return f"{int(num):,}"
 
