@@ -65,71 +65,78 @@ def generate_report():
 
 
 # --------------------------------------------------------------------------------
-# 광고 크리에이티브 이미지/동영상 URL 및 콘텐츠 유형 가져오기 (병렬 처리)
+# 광고 크리에이티브 미디어 URL 병렬 처리 (이미지 및 비디오)
 # --------------------------------------------------------------------------------
-def get_creative_media(ad_id, ver, token):
-    """
-    주어진 광고 ID에 대해 크리에이티브 정보를 조회하고,
-    이미지 URL(또는 영상 재생 URL)과 콘텐츠 유형("사진" or "동영상")을 반환합니다.
-    """
+
+def get_creative_media_urls(ad_id, ver, token):
     creative_url = f"https://graph.facebook.com/{ver}/{ad_id}"
-    creative_params = {'fields': 'creative', 'access_token': token}
+    creative_params = {
+        'fields': 'creative',
+        'access_token': token
+    }
     creative_response = requests.get(url=creative_url, params=creative_params)
-    if creative_response.status_code != 200:
-        return { "url": "", "type": "사진" }
-    creative_data = creative_response.json()
-    creative_id = creative_data.get('creative', {}).get('id')
-    if not creative_id:
-        return { "url": "", "type": "사진" }
+    result = {"image_url": "", "video_url": ""}
     
-    image_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-    image_params = {'fields': 'image_url,thumbnail_url,object_story_spec', 'access_token': token}
-    image_response = requests.get(url=image_req_url, params=image_params)
-    if image_response.status_code != 200:
-        return { "url": "", "type": "사진" }
-    image_data = image_response.json()
+    if creative_response.status_code == 200:
+        creative_data = creative_response.json()
+        creative_id = creative_data.get('creative', {}).get('id')
+        if creative_id:
+            media_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
+            media_params = {
+                'fields': 'image_url,thumbnail_url,object_story_spec,video_id',
+                'access_token': token
+            }
+            media_response = requests.get(url=media_req_url, params=media_params)
+            if media_response.status_code == 200:
+                media_data = media_response.json()
+                
+                # 비디오 ID가 있는 경우 비디오 URL 가져오기
+                video_id = media_data.get('video_id')
+                if video_id:
+                    video_req_url = f"https://graph.facebook.com/{ver}/{video_id}"
+                    video_params = {
+                        'fields': 'source',
+                        'access_token': token
+                    }
+                    video_response = requests.get(url=video_req_url, params=video_params)
+                    if video_response.status_code == 200:
+                        video_data = video_response.json()
+                        result["video_url"] = video_data.get('source', '')
+                
+                # 이미지 URL 처리 (기존 로직)
+                image_url = media_data.get('image_url')
+                if not image_url and 'object_story_spec' in media_data:
+                    story_spec = media_data.get('object_story_spec', {})
+                    if 'photo_data' in story_spec:
+                        image_url = story_spec.get('photo_data', {}).get('image_url')
+                    elif 'link_data' in story_spec and 'image_url' in story_spec.get('link_data', {}):
+                        image_url = story_spec.get('link_data', {}).get('image_url')
+                if not image_url:
+                    image_url = media_data.get('thumbnail_url')
+                
+                result["image_url"] = image_url
     
-    # 기본은 사진
-    content_type = "사진"
-    # 영상 판단: object_story_spec 안에 video_data가 있으면 영상으로 간주
-    if 'object_story_spec' in image_data:
-        oss = image_data.get('object_story_spec', {})
-        if 'video_data' in oss:
-            content_type = "동영상"
-            video_data = oss.get('video_data', {})
-            video_id = video_data.get('video_id')
-            if video_id:
-                # 실제 재생 가능한 링크 (Facebook Watch)를 생성
-                media_url = "https://www.facebook.com/watch/?v=" + video_id
-                return { "url": media_url, "type": content_type }
-            else:
-                # video_id가 없으면, fallback으로 thumbnail_url 사용
-                media_url = image_data.get('thumbnail_url') or ""
-                return { "url": media_url, "type": content_type }
-    # 사진인 경우: image_url 우선, 없으면 thumbnail_url
-    media_url = image_data.get('image_url')
-    if not media_url:
-        media_url = image_data.get('thumbnail_url') or ""
-    return { "url": media_url, "type": content_type }
+    return result
 
 def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         for ad_id in ad_data.keys():
-            futures[executor.submit(get_creative_media, ad_id, ver, token)] = ad_id
+            futures[executor.submit(get_creative_media_urls, ad_id, ver, token)] = ad_id
         for future in as_completed(futures):
             ad_id = futures[future]
             try:
-                result = future.result()  # result is a dict with "url" and "type"
+                media_urls = future.result()
+                ad_data[ad_id]['image_url'] = media_urls.get("image_url", "")
+                ad_data[ad_id]['video_url'] = media_urls.get("video_url", "")
             except Exception:
-                result = { "url": "", "type": "사진" }
-            ad_data[ad_id]['image_url'] = result["url"]
-            ad_data[ad_id]['content_type'] = result["type"]
-
+                ad_data[ad_id]['image_url'] = ""
+                ad_data[ad_id]['video_url'] = ""
 
 # --------------------------------------------------------------------------------
-# 메인 함수: 구매 수, 구매당 비용 및 광고 성과 (구매당 비용 기준) 추가 + 콘텐츠 유형 추가
+# 메인 함수: 구매 수와 구매당 비용 및 광고 성과 (구매당 비용 기준) 추가
 # --------------------------------------------------------------------------------
+
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
@@ -153,6 +160,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
+        
         link_clicks = 0
         purchase_count = 0
         actions = record.get('actions')
@@ -163,225 +171,9 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                         link_clicks += int(action.get("value", 0))
                     except ValueError:
                         link_clicks += 0
-                # purchase: 필요 시 추가 조건("omni_purchase" 등) 가능
+                # purchase: 필요 시 여러 purchase 유형(omni_purchase 등) 추가
                 if action.get("action_type") == "purchase":
-                    try:
+                     try:
                         purchase_count += int(action.get("value", 0))
                     except ValueError:
                         purchase_count += 0
-        record["link_clicks"] = link_clicks
-        record["purchase_count"] = purchase_count
-
-        # 중복 데이터 합산 (광고 ID별)
-        if ad_id not in ad_data:
-            ad_data[ad_id] = record
-        else:
-            for key in ['spend', 'impressions', 'link_clicks', 'purchase_count']:
-                if key in record:
-                    ad_data[ad_id][key] = str(
-                        float(ad_data[ad_id].get(key, '0')) + float(record.get(key, '0'))
-                    )
-
-    # 2) 병렬로 크리에이티브 URL 및 콘텐츠 유형 가져오기
-    fetch_creatives_parallel(ad_data, ver, token, max_workers=10)
-
-    # 3) DataFrame 변환 및 숫자형 컬럼 정리
-    result_list = list(ad_data.values())
-    df = pd.DataFrame(result_list)
-    for col in ['spend', 'impressions', 'link_clicks', 'purchase_count']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col]).round(0).astype(int)
-
-    # CTR 및 CPC (링크 클릭 기준)
-    if 'link_clicks' in df.columns and 'impressions' in df.columns:
-        df['ctr'] = df.apply(
-            lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100, 2)}%" if r['impressions'] > 0 else "0%",
-            axis=1
-        )
-    if 'spend' in df.columns and 'link_clicks' in df.columns:
-        df['cpc'] = df.apply(
-            lambda r: round(r['spend'] / r['link_clicks']) if r['link_clicks'] > 0 else 0,
-            axis=1
-        )
-    # 구매당 비용 = FB 광고비용 / 구매 수
-    if 'purchase_count' in df.columns and 'spend' in df.columns:
-        df['cost_per_purchase'] = df.apply(
-            lambda r: round(r['spend'] / r['purchase_count']) if r['purchase_count'] > 0 else 0,
-            axis=1
-        )
-    else:
-        df['cost_per_purchase'] = 0
-
-    # 새로 추가: 콘텐츠 유형 (이미 fetch_creatives_parallel에서 'content_type'를 저장함)
-    # DataFrame에 해당 컬럼이 없으면 빈 문자열로 채움
-    if 'content_type' not in df.columns:
-        df['content_type'] = ""
-    
-    # 컬럼명 한글화 및 재명명
-    df = df.rename(columns={
-        'ad_name': '광고명',
-        'campaign_name': '캠페인명',
-        'adset_name': '광고세트명',
-        'spend': 'FB 광고비용',
-        'impressions': '노출',
-        'link_clicks': 'Click',
-        'ctr': 'CTR',
-        'cpc': 'CPC',
-        'purchase_count': '구매 수',
-        'cost_per_purchase': '구매당 비용',
-        'content_type': '콘텐츠 유형'
-    })
-
-    # 4) 합계 행 처리 (전체 값: 가중 평균 방식)
-    total_spend = df['FB 광고비용'].sum()
-    total_clicks = df['Click'].sum()
-    total_impressions = df['노출'].sum()
-    total_purchases = df['구매 수'].sum()
-    total_ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions > 0 else 0
-    total_cpc = round(total_spend / total_clicks) if total_clicks > 0 else 0
-    total_cpp = round(total_spend / total_purchases) if total_purchases > 0 else 0
-
-    totals_row = pd.Series([
-        '합계', '', '', total_spend, total_impressions, total_clicks,
-        f"{total_ctr}%", total_cpc, total_purchases, total_cpp, '', ''
-    ],
-    index=['광고명','캠페인명','광고세트명','FB 광고비용','노출','Click','CTR','CPC','구매 수','구매당 비용','광고 콘텐츠','콘텐츠 유형'])
-    df_with_total = pd.concat([pd.DataFrame([totals_row]), df], ignore_index=True)
-
-    # 5) 테이블 정렬: 합계 행은 최상단, 나머지는 구매당 비용 기준(0원은 가장 큰 값 처리)
-    def custom_sort_key(row):
-        if row['광고명'] == '합계':
-            return -1
-        cost = row.get('구매당 비용', 0)
-        if cost == 0:
-            return 999999999  # 0원은 최하단
-        return cost
-    df_with_total['sort_key'] = df_with_total.apply(custom_sort_key, axis=1)
-    df_sorted = df_with_total.sort_values(by='sort_key', ascending=True).drop('sort_key', axis=1)
-
-    # 6) 광고 성과 컬럼 재생성 (구매당 비용 기준)
-    #  - 구매당 비용이 0이면 빈 값
-    #  - cost >= 100000이면 "개선 필요!" (빨강)
-    #  - 그 외, cost < 100000인 경우 0원 제외 3순위만 라벨 부여:
-    #       최저(0 제외): "위닝 콘텐츠" (초록)
-    #       2순위: "고성과 콘텐츠" (노랑)
-    #       3순위: "성과 콘텐츠" (주황)
-    df_non_total = df_sorted[df_sorted['광고명'] != '합계']
-    df_valid = df_non_total[df_non_total['구매당 비용'] > 0]
-    df_valid_low = df_valid[df_valid['구매당 비용'] < 100000].sort_values(by='구매당 비용', ascending=True)
-    top_indices = df_valid_low.head(3).index.tolist()
-    def categorize_performance(row):
-        if row['광고명'] == '합계':
-            return ''
-        cost = row['구매당 비용']
-        if cost == 0:
-            return ''
-        if cost >= 100000:
-            return '개선 필요!'
-        if row.name in top_indices:
-            if row.name == top_indices[0]:
-                return '위닝 콘텐츠'
-            elif len(top_indices) > 1 and row.name == top_indices[1]:
-                return '고성과 콘텐츠'
-            elif len(top_indices) > 2 and row.name == top_indices[2]:
-                return '성과 콘텐츠'
-        return ''
-    df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1)
-
-    # 7) HTML 테이블 생성
-    #    "광고 콘텐츠" (원본: image_url)와 "콘텐츠 유형" 컬럼 추가 및 컬럼 순서 조정
-    #    헤더는 가운데 정렬, 데이터는 오른쪽 정렬
-    def format_currency(amount):
-        return f"{int(amount):,} ₩"
-    def format_number(num):
-        return f"{int(num):,}"
-    
-    html_table = """
-    <style>
-      table {border-collapse: collapse; width: 100%;}
-      th, td {padding: 8px; border-bottom: 1px solid #ddd;}
-      th {background-color: #f2f2f2; text-align: center; white-space: nowrap;}
-      td {text-align: right; white-space: nowrap; vertical-align: middle;}
-      tr:hover {background-color: #f5f5f5;}
-      .total-row {background-color: #e6f2ff; font-weight: bold;}
-      .winning-content {color: #009900; font-weight: bold;}       /* 초록: 위닝 콘텐츠 */
-      .medium-performance {color: #FFD700; font-weight: bold;}      /* 노랑: 고성과 콘텐츠 */
-      .third-performance {color: #FF9900; font-weight: bold;}         /* 주황: 성과 콘텐츠 */
-      .needs-improvement {color: #FF0000; font-weight: bold;}         /* 빨강: 개선 필요! */
-      a {text-decoration: none; color: inherit;}
-    </style>
-    <table>
-      <tr>
-        <th>광고명</th>
-        <th>캠페인명</th>
-        <th>광고세트명</th>
-        <th>FB 광고비용</th>
-        <th>노출</th>
-        <th>Click</th>
-        <th>CTR</th>
-        <th>CPC</th>
-        <th>구매 수</th>
-        <th>구매당 비용</th>
-        <th>광고 성과</th>
-        <th>광고 콘텐츠</th>
-        <th>콘텐츠 유형</th>
-      </tr>
-    """
-    for _, row in df_sorted.iterrows():
-        row_class = 'total-row' if row['광고명'] == '합계' else ''
-        performance_text = row.get('광고 성과', '')
-        if performance_text == '위닝 콘텐츠':
-            performance_class = 'winning-content'
-        elif performance_text == '고성과 콘텐츠':
-            performance_class = 'medium-performance'
-        elif performance_text == '성과 콘텐츠':
-            performance_class = 'third-performance'
-        elif performance_text == '개선 필요!':
-            performance_class = 'needs-improvement'
-        else:
-            performance_class = ''
-        # 광고 콘텐츠: <a> 태그로 감싸 클릭 시 원본 URL 열기
-        img_url = row.get("광고 콘텐츠", "")
-        if pd.notna(img_url) and img_url != "":
-            media_tag = f'<a href="{img_url}" target="_blank"><img src="{img_url}" style="max-width:100px; max-height:100px;"></a>'
-        else:
-            media_tag = ""
-        # 콘텐츠 유형: 그대로 표기
-        content_type = row.get("콘텐츠 유형", "")
-        html_table += f"""
-        <tr class="{row_class}">
-          <td>{row.get('광고명','')}</td>
-          <td>{row.get('캠페인명','')}</td>
-          <td>{row.get('광고세트명','')}</td>
-          <td>{format_currency(row.get('FB 광고비용',0))}</td>
-          <td>{format_number(row.get('노출',0))}</td>
-          <td>{format_number(row.get('Click',0))}</td>
-          <td>{row.get('CTR','0%')}</td>
-          <td>{format_number(row.get('CPC',0))}</td>
-          <td>{format_number(row.get('구매 수',0))}</td>
-          <td>{format_number(row.get('구매당 비용',0))}</td>
-          <td class="{performance_class}">{performance_text}</td>
-          <td>{media_tag}</td>
-          <td>{content_type}</td>
-        </tr>
-        """
-    html_table += "</table>"
-
-    # Infinity/NaN 방지 클리닝
-    def clean_numeric(data):
-        if isinstance(data, dict):
-            return {k: clean_numeric(v) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [clean_numeric(item) for item in data]
-        elif isinstance(data, float):
-            if math.isinf(data) or math.isnan(data):
-                return 0
-        return data
-
-    records = df_sorted.to_dict(orient='records')
-    cleaned_records = clean_numeric(records)
-    return {"html_table": html_table, "data": cleaned_records}
-
-# Flask 앱 실행 (로컬 테스트용, Vercel에서는 필요 없음)
-# if __name__ == '__main__':
-#    app.run(debug=True)
