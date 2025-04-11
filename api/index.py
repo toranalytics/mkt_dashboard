@@ -1,4 +1,4 @@
-import math
+import math 
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -190,15 +190,15 @@ def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     """
     데이터를 가져와 집계 및 DataFrame으로 정리합니다.
-    수정된 부분: 클릭 수는 actions의 link_click이 아니라 API의 "clicks" 필드를 사용합니다.
+    수정된 부분: 클릭 수는 actions의 link_click이 아니라, API의 "clicks" 필드를 그대로 사용합니다.
     """
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
     params = {
-        'fields': metrics,
-        'access_token': token,
+        'fields': metrics, 
+        'access_token': token, 
         'level': 'ad',
-        'time_range[since]': start_date,
+        'time_range[since]': start_date, 
         'time_range[until]': end_date,
         'use_unified_attribution_setting': 'true'
     }
@@ -209,16 +209,15 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     records = data.get('data', [])
     ad_data = {}
 
-    # 1) 데이터 집계 (API의 clicks 필드를 사용)
+    # 1) 데이터 집계: API의 "clicks" 필드를 사용 (기존 actions 링크 클릭 집계 로직 제거)
     for record in records:
         ad_id = record.get('ad_id')
-        if not ad_id:
+        if not ad_id: 
             continue
 
-        # actions에서 link_click을 세던 로직을 제거하고, 전체 클릭수를 그대로 사용
         try:
             api_clicks = int(record.get("clicks", 0))
-        except:
+        except Exception:
             api_clicks = 0
 
         spend = float(record.get("spend", 0))
@@ -235,7 +234,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             "ad_name": ad_name,
             "spend": spend,
             "impressions": impressions,
-            "clicks": api_clicks,   # 전체 클릭 수 사용
+            "clicks": api_clicks,  # API의 전체 클릭 수 사용
             "ctr": ctr,
             "cpc": cpc
         }
@@ -243,12 +242,10 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # 2) 크리에이티브 정보 병렬 요청
     fetch_creatives_parallel(ad_data, ver, token)
 
-    # 3) DataFrame 변환
+    # 3) DataFrame 변환 후 사전 형태로 변환 (엑셀 등 다른 출력 방식으로 쉽게 변경 가능)
     df = pd.DataFrame.from_dict(ad_data, orient='index')
     df.index.name = "ad_id"
     df.reset_index(inplace=True)
-
-    # 4) 필요하면 이후 로직(예: 엑셀로 저장, 반환 형식 조정 등)을 추가
     result = df.to_dict(orient='records')
     return {"data": result}
 
