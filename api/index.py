@@ -221,18 +221,16 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         except Exception:
             record["link_clicks"] = 0
 
-        # 구매 수는 actions에서 "purchase" 및 "omni_purchase" 이벤트를 통해 집계합니다.
+        # 구매 수는 actions에서 "purchase" 이벤트만 사용 (버전 2 방식)
         purchase_count = 0
         actions = record.get('actions')
         if actions and isinstance(actions, list):
             for action in actions:
-                action_type = action.get("action_type", "")
-                try:
-                    value = int(action.get("value", 0))
-                except (ValueError, TypeError):
-                    value = 0
-                if action_type == "purchase" or action_type.startswith("omni_purchase"):
-                    purchase_count += value
+                if action.get("action_type") == "purchase":
+                    try:
+                        purchase_count += int(action.get("value", 0))
+                    except ValueError:
+                        purchase_count += 0
         record["purchase_count"] = purchase_count
 
         ad_data[ad_id] = record
