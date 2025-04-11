@@ -62,11 +62,10 @@ def generate_report():
         return jsonify({"error": "An internal server error occurred while generating the report."}), 500
 
 
-# === 여기가 수정된 함수 ===
 def get_creative_details(ad_id, ver, token):
     """
     광고 ID를 사용하여 크리에이티브 상세 정보 (콘텐츠 유형, 표시 URL, 대상 URL)를 가져옵니다.
-    object_type 필드를 우선적으로 확인하여 정확도를 높입니다.
+    object_type 필드 및 SHARE 유형을 고려하여 정확도를 높입니다.
     """
     creative_details = {
         'content_type': '알 수 없음', # 기본값
@@ -74,7 +73,7 @@ def get_creative_details(ad_id, ver, token):
         'target_url': ''
     }
     try:
-        # 1. 광고 ID로 크리에이티브 ID 가져오기
+        # 1. 광고 ID로 크리에이티브 ID 가져오기 (이전과 동일)
         creative_req_url = f"https://graph.facebook.com/{ver}/{ad_id}"
         creative_params = {'fields': 'creative', 'access_token': token}
         creative_response = requests.get(url=creative_req_url, params=creative_params)
@@ -83,10 +82,9 @@ def get_creative_details(ad_id, ver, token):
         creative_id = creative_data.get('creative', {}).get('id')
 
         if creative_id:
-            # 2. 크리에이티브 ID로 상세 정보 가져오기 (object_type 추가 요청)
+            # 2. 크리에이티브 ID로 상세 정보 가져오기 (이전과 동일)
             details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-            # object_type 필드 추가!
-            fields = 'object_type,image_url,thumbnail_url,video_id,object_story_spec{link_data{image_hash,image_url},photo_data{image_hash,image_url},video_data{video_id,image_url}}'
+            fields = 'object_type,image_url,thumbnail_url,video_id,effective_object_story_id,object_story_spec{link_data{image_hash,image_url,video_id,picture},photo_data{image_hash,image_url},video_data{video_id,image_url}}'
             details_params = {'fields': fields, 'access_token': token}
             details_response = requests.get(url=details_req_url, params=details_params)
             details_response.raise_for_status()
@@ -97,42 +95,65 @@ def get_creative_details(ad_id, ver, token):
             image_url = details_data.get('image_url')
             thumbnail_url = details_data.get('thumbnail_url')
             story_spec = details_data.get('object_story_spec', {})
-            oss_video_id = story_spec.get('video_data', {}).get('video_id')
+            # object_story_spec 내 비디오/이미지 정보 추출
+            oss_video_id = story_spec.get('video_data', {}).get('video_id') or story_spec.get('link_data', {}).get('video_id') # link_data 내 video_id도 확인
             oss_image_url = (
                 story_spec.get('photo_data', {}).get('image_url') or
                 story_spec.get('link_data', {}).get('image_url') or
-                story_spec.get('video_data', {}).get('image_url') # 비디오 썸네일 대체
+                story_spec.get('link_data', {}).get('picture') or # link_data 내 picture도 확인
+                story_spec.get('video_data', {}).get('image_url')
             )
+            actual_video_id = video_id or oss_video_id # 최종 비디오 ID
 
-            # --- 유형 판별 로직 개선 ---
-            # 1순위: object_type 확인
+            # --- 유형 판별 로직 (SHARE 타입 처리 추가) ---
+            # 1순위: 명시적 object_type 확인
             if object_type == 'VIDEO':
                 creative_details['content_type'] = '동영상'
-                actual_video_id = video_id or oss_video_id
-                # 표시 URL: 썸네일 > 이미지 URL > OSS 이미지 순서로 찾기
                 creative_details['display_url'] = thumbnail_url or image_url or oss_image_url or ""
                 creative_details['target_url'] = f"https://www.facebook.com/watch/?v={actual_video_id}" if actual_video_id else creative_details['display_url']
-
             elif object_type == 'PHOTO':
                 creative_details['content_type'] = '사진'
-                # 표시/대상 URL: 이미지 URL > OSS 이미지 > 썸네일 순서로 찾기
                 creative_details['display_url'] = image_url or oss_image_url or thumbnail_url or ""
                 creative_details['target_url'] = creative_details['display_url']
 
-            # 2순위: object_type이 없거나 다른 경우, video_id 유무로 판별 (기존 로직 보강)
-            elif video_id or oss_video_id:
-                 creative_details['content_type'] = '동영상'
-                 actual_video_id = video_id or oss_video_id
-                 creative_details['display_url'] = thumbnail_url or image_url or oss_image_url or ""
-                 creative_details['target_url'] = f"https://www.facebook.com/watch/?v={actual_video_id}" if actual_video_id else creative_details['display_url']
+            # 2순위: SHARE 타입 처리 (JSON 분석 기반)
+            elif object_type == 'SHARE':
+                # SHARE 타입인데 image_url이 있으면 '사진'으로 간주 (예: 이미지 게시물 공유)
+                if image_url or oss_image_url:
+                     creative_details['content_type'] = '사진'
+                     creative_details['display_url'] = image_url or oss_image_url or thumbnail_url or ""
+                     creative_details['target_url'] = creative_details['display_url']
+                # SHARE 타입인데 image_url은 없고 thumbnail_url만 있으면 '동영상'(숏폼/릴스)으로 추정
+                elif thumbnail_url:
+                     creative_details['content_type'] = '동영상' # 추정치!
+                     creative_details['display_url'] = thumbnail_url
+                     # 비디오 ID가 없으므로 썸네일 또는 effective_object_story_id 기반 링크 필요
+                     # 우선 썸네일 링크 사용. 더 정확하려면 effective_object_story_id로 추가 조회 필요.
+                     story_id = details_data.get('effective_object_story_id')
+                     if story_id:
+                         # 인스타그램 링크 시도 (page_id_post-id 형식)
+                         if "_" in story_id:
+                              creative_details['target_url'] = f"https://www.instagram.com/p/{story_id.split('_')[1]}/" # Instagram Post URL 시도
+                         else:
+                              creative_details['target_url'] = thumbnail_url # Fallback
+                     else:
+                          creative_details['target_url'] = thumbnail_url # Fallback
 
-            # 3순위: video_id도 없고 object_type도 VIDEO가 아니면, 이미지 URL 유무로 판별
-            elif image_url or oss_image_url or thumbnail_url: # 썸네일만 있어도 사진으로 간주
+                # 둘 다 없으면 '알 수 없음' 유지
+
+            # 3순위: object_type 불명확 시 video_id 유무로 판별
+            elif actual_video_id:
+                creative_details['content_type'] = '동영상'
+                creative_details['display_url'] = thumbnail_url or image_url or oss_image_url or ""
+                creative_details['target_url'] = f"https://www.facebook.com/watch/?v={actual_video_id}"
+
+            # 4순위: 그래도 불명확하면 이미지/썸네일 유무로 판별
+            elif image_url or oss_image_url or thumbnail_url:
                 creative_details['content_type'] = '사진'
                 creative_details['display_url'] = image_url or oss_image_url or thumbnail_url or ""
                 creative_details['target_url'] = creative_details['display_url']
 
-            # 기타 (예: LINK, STATUS 등 object_type이거나 아무것도 없는 경우) -> '알 수 없음' 유지
+            # 5순위: 모든 조건 불충족 시 '알 수 없음' 유지
 
     except requests.exceptions.RequestException as e:
         print(f"Error fetching creative details for ad {ad_id}: {e}")
