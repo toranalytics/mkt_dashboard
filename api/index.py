@@ -65,58 +65,71 @@ def generate_report():
 
 
 # --------------------------------------------------------------------------------
-# 광고 크리에이티브 이미지 URL 병렬 처리
+# 광고 크리에이티브 이미지/동영상 URL 및 콘텐츠 유형 가져오기 (병렬 처리)
 # --------------------------------------------------------------------------------
-
-def get_creative_image_url(ad_id, ver, token):
+def get_creative_media(ad_id, ver, token):
+    """
+    주어진 광고 ID에 대해 크리에이티브 정보를 조회하고,
+    이미지 URL(또는 영상 재생 URL)과 콘텐츠 유형("사진" or "동영상")을 반환합니다.
+    """
     creative_url = f"https://graph.facebook.com/{ver}/{ad_id}"
-    creative_params = {
-        'fields': 'creative',
-        'access_token': token
-    }
+    creative_params = {'fields': 'creative', 'access_token': token}
     creative_response = requests.get(url=creative_url, params=creative_params)
-    if creative_response.status_code == 200:
-        creative_data = creative_response.json()
-        creative_id = creative_data.get('creative', {}).get('id')
-        if creative_id:
-            image_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-            image_params = {
-                'fields': 'image_url,thumbnail_url,object_story_spec',
-                'access_token': token
-            }
-            image_response = requests.get(url=image_req_url, params=image_params)
-            if image_response.status_code == 200:
-                image_data = image_response.json()
-                image_url = image_data.get('image_url')
-                if not image_url and 'object_story_spec' in image_data:
-                    story_spec = image_data.get('object_story_spec', {})
-                    if 'photo_data' in story_spec:
-                        image_url = story_spec.get('photo_data', {}).get('image_url')
-                    elif 'link_data' in story_spec and 'image_url' in story_spec.get('link_data', {}):
-                        image_url = story_spec.get('link_data', {}).get('image_url')
-                if not image_url:
-                    image_url = image_data.get('thumbnail_url')
-                return image_url
-    return ""
+    if creative_response.status_code != 200:
+        return { "url": "", "type": "사진" }
+    creative_data = creative_response.json()
+    creative_id = creative_data.get('creative', {}).get('id')
+    if not creative_id:
+        return { "url": "", "type": "사진" }
+    
+    image_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
+    image_params = {'fields': 'image_url,thumbnail_url,object_story_spec', 'access_token': token}
+    image_response = requests.get(url=image_req_url, params=image_params)
+    if image_response.status_code != 200:
+        return { "url": "", "type": "사진" }
+    image_data = image_response.json()
+    
+    # 기본은 사진
+    content_type = "사진"
+    # 영상 판단: object_story_spec 안에 video_data가 있으면 영상으로 간주
+    if 'object_story_spec' in image_data:
+        oss = image_data.get('object_story_spec', {})
+        if 'video_data' in oss:
+            content_type = "동영상"
+            video_data = oss.get('video_data', {})
+            video_id = video_data.get('video_id')
+            if video_id:
+                # 실제 재생 가능한 링크 (Facebook Watch)를 생성
+                media_url = "https://www.facebook.com/watch/?v=" + video_id
+                return { "url": media_url, "type": content_type }
+            else:
+                # video_id가 없으면, fallback으로 thumbnail_url 사용
+                media_url = image_data.get('thumbnail_url') or ""
+                return { "url": media_url, "type": content_type }
+    # 사진인 경우: image_url 우선, 없으면 thumbnail_url
+    media_url = image_data.get('image_url')
+    if not media_url:
+        media_url = image_data.get('thumbnail_url') or ""
+    return { "url": media_url, "type": content_type }
 
 def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         for ad_id in ad_data.keys():
-            futures[executor.submit(get_creative_image_url, ad_id, ver, token)] = ad_id
+            futures[executor.submit(get_creative_media, ad_id, ver, token)] = ad_id
         for future in as_completed(futures):
             ad_id = futures[future]
             try:
-                img_url = future.result()
+                result = future.result()  # result is a dict with "url" and "type"
             except Exception:
-                img_url = ""
-            ad_data[ad_id]['image_url'] = img_url
+                result = { "url": "", "type": "사진" }
+            ad_data[ad_id]['image_url'] = result["url"]
+            ad_data[ad_id]['content_type'] = result["type"]
 
 
 # --------------------------------------------------------------------------------
-# 메인 함수: 구매 수와 구매당 비용 및 광고 성과 (구매당 비용 기준) 추가
+# 메인 함수: 구매 수, 구매당 비용 및 광고 성과 (구매당 비용 기준) 추가 + 콘텐츠 유형 추가
 # --------------------------------------------------------------------------------
-
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
@@ -140,7 +153,6 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
-        
         link_clicks = 0
         purchase_count = 0
         actions = record.get('actions')
@@ -151,13 +163,12 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                         link_clicks += int(action.get("value", 0))
                     except ValueError:
                         link_clicks += 0
-                # purchase: 필요 시 여러 purchase 유형(omni_purchase 등) 추가
+                # purchase: 필요 시 추가 조건("omni_purchase" 등) 가능
                 if action.get("action_type") == "purchase":
                     try:
                         purchase_count += int(action.get("value", 0))
                     except ValueError:
                         purchase_count += 0
-        
         record["link_clicks"] = link_clicks
         record["purchase_count"] = purchase_count
 
@@ -171,7 +182,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                         float(ad_data[ad_id].get(key, '0')) + float(record.get(key, '0'))
                     )
 
-    # 2) 병렬로 크리에이티브 이미지 URL 가져오기
+    # 2) 병렬로 크리에이티브 URL 및 콘텐츠 유형 가져오기
     fetch_creatives_parallel(ad_data, ver, token, max_workers=10)
 
     # 3) DataFrame 변환 및 숫자형 컬럼 정리
@@ -181,7 +192,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         if col in df.columns:
             df[col] = pd.to_numeric(df[col]).round(0).astype(int)
 
-    # CTR 및 CPC 계산 (링크 클릭 기준)
+    # CTR 및 CPC (링크 클릭 기준)
     if 'link_clicks' in df.columns and 'impressions' in df.columns:
         df['ctr'] = df.apply(
             lambda r: f"{round(r['link_clicks'] / r['impressions'] * 100, 2)}%" if r['impressions'] > 0 else "0%",
@@ -192,7 +203,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             lambda r: round(r['spend'] / r['link_clicks']) if r['link_clicks'] > 0 else 0,
             axis=1
         )
-    # 구매당 비용 = spend / purchase_count (구매 수가 0이면 0)
+    # 구매당 비용 = FB 광고비용 / 구매 수
     if 'purchase_count' in df.columns and 'spend' in df.columns:
         df['cost_per_purchase'] = df.apply(
             lambda r: round(r['spend'] / r['purchase_count']) if r['purchase_count'] > 0 else 0,
@@ -201,6 +212,11 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     else:
         df['cost_per_purchase'] = 0
 
+    # 새로 추가: 콘텐츠 유형 (이미 fetch_creatives_parallel에서 'content_type'를 저장함)
+    # DataFrame에 해당 컬럼이 없으면 빈 문자열로 채움
+    if 'content_type' not in df.columns:
+        df['content_type'] = ""
+    
     # 컬럼명 한글화 및 재명명
     df = df.rename(columns={
         'ad_name': '광고명',
@@ -212,10 +228,11 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'ctr': 'CTR',
         'cpc': 'CPC',
         'purchase_count': '구매 수',
-        'cost_per_purchase': '구매당 비용'
+        'cost_per_purchase': '구매당 비용',
+        'content_type': '콘텐츠 유형'
     })
 
-    # 4) 합계 행 처리 (전체 값 가중 평균 방식)
+    # 4) 합계 행 처리 (전체 값: 가중 평균 방식)
     total_spend = df['FB 광고비용'].sum()
     total_clicks = df['Click'].sum()
     total_impressions = df['노출'].sum()
@@ -226,37 +243,33 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
 
     totals_row = pd.Series([
         '합계', '', '', total_spend, total_impressions, total_clicks,
-        f"{total_ctr}%", total_cpc, total_purchases, total_cpp, ''
-    ], index=['광고명','캠페인명','광고세트명','FB 광고비용','노출','Click','CTR','CPC','구매 수','구매당 비용','image_url'])
+        f"{total_ctr}%", total_cpc, total_purchases, total_cpp, '', ''
+    ],
+    index=['광고명','캠페인명','광고세트명','FB 광고비용','노출','Click','CTR','CPC','구매 수','구매당 비용','광고 콘텐츠','콘텐츠 유형'])
     df_with_total = pd.concat([pd.DataFrame([totals_row]), df], ignore_index=True)
 
-    # 5) 테이블 정렬: 합계 행은 맨 위, 그 외는 구매당 비용 기준으로 정렬
-    #    구매당 비용이 0인 경우는 매우 큰 값으로 취급해 맨 아래로 배치
+    # 5) 테이블 정렬: 합계 행은 최상단, 나머지는 구매당 비용 기준(0원은 가장 큰 값 처리)
     def custom_sort_key(row):
         if row['광고명'] == '합계':
             return -1
         cost = row.get('구매당 비용', 0)
         if cost == 0:
-            return 999999999
+            return 999999999  # 0원은 최하단
         return cost
     df_with_total['sort_key'] = df_with_total.apply(custom_sort_key, axis=1)
     df_sorted = df_with_total.sort_values(by='sort_key', ascending=True).drop('sort_key', axis=1)
 
     # 6) 광고 성과 컬럼 재생성 (구매당 비용 기준)
-    #    - 구매당 비용이 0이면 빈 값
-    #    - cost >= 100000이면 "개선 필요!" (빨간색)
-    #    - 그 외, 0이 아닌 구매당 비용 중 3순위 (낮은 순)만 라벨 부여:
-    #         최저(0 제외): "위닝 콘텐츠" (초록색)
-    #         2순위: "고성과 콘텐츠" (노랑색)
-    #         3순위: "성과 콘텐츠" (주황색)
-    #    - 나머지는 빈 값
+    #  - 구매당 비용이 0이면 빈 값
+    #  - cost >= 100000이면 "개선 필요!" (빨강)
+    #  - 그 외, cost < 100000인 경우 0원 제외 3순위만 라벨 부여:
+    #       최저(0 제외): "위닝 콘텐츠" (초록)
+    #       2순위: "고성과 콘텐츠" (노랑)
+    #       3순위: "성과 콘텐츠" (주황)
     df_non_total = df_sorted[df_sorted['광고명'] != '합계']
-    # 필터: 구매당 비용 > 0
     df_valid = df_non_total[df_non_total['구매당 비용'] > 0]
-    # 구매당 비용 < 100000인 경우만 순위 부여; cost >=100000는 바로 "개선 필요!"
     df_valid_low = df_valid[df_valid['구매당 비용'] < 100000].sort_values(by='구매당 비용', ascending=True)
     top_indices = df_valid_low.head(3).index.tolist()
-
     def categorize_performance(row):
         if row['광고명'] == '합계':
             return ''
@@ -265,9 +278,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             return ''
         if cost >= 100000:
             return '개선 필요!'
-        # cost < 100000인 경우: 3순위만 라벨 부여 (top_indices는 구매당 비용 낮은 순)
         if row.name in top_indices:
-            # top_indices[0] → 최저 → "위닝 콘텐츠", top_indices[1] → "고성과 콘텐츠", top_indices[2] → "성과 콘텐츠"
             if row.name == top_indices[0]:
                 return '위닝 콘텐츠'
             elif len(top_indices) > 1 and row.name == top_indices[1]:
@@ -275,10 +286,11 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             elif len(top_indices) > 2 and row.name == top_indices[2]:
                 return '성과 콘텐츠'
         return ''
-        
     df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1)
 
-    # 7) HTML 테이블 생성 (숫자 포매팅 및 광고 성과 CSS 적용)
+    # 7) HTML 테이블 생성
+    #    "광고 콘텐츠" (원본: image_url)와 "콘텐츠 유형" 컬럼 추가 및 컬럼 순서 조정
+    #    헤더는 가운데 정렬, 데이터는 오른쪽 정렬
     def format_currency(amount):
         return f"{int(amount):,} ₩"
     def format_number(num):
@@ -286,17 +298,17 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     
     html_table = """
     <style>
-    table {border-collapse: collapse; width: 100%;}
-    th, td {padding: 8px; border-bottom: 1px solid #ddd;}
-    th {background-color: #f2f2f2; text-align: center; white-space: nowrap;}
-    td {text-align: right; white-space: nowrap; vertical-align: middle;}
-    tr:hover {background-color: #f5f5f5;}
-    .total-row {background-color: #e6f2ff; font-weight: bold;}
-    .winning-content {color: #009900; font-weight: bold;}       /* 초록: 위닝 콘텐츠 */
-    .medium-performance {color: #FFD700; font-weight: bold;}      /* 노랑: 고성과 콘텐츠 */
-    .third-performance {color: #FF9900; font-weight: bold;}         /* 주황: 성과 콘텐츠 */
-    .needs-improvement {color: #FF0000; font-weight: bold;}         /* 빨강: 개선 필요! */
-    a {text-decoration: none; color: inherit;}
+      table {border-collapse: collapse; width: 100%;}
+      th, td {padding: 8px; border-bottom: 1px solid #ddd;}
+      th {background-color: #f2f2f2; text-align: center; white-space: nowrap;}
+      td {text-align: right; white-space: nowrap; vertical-align: middle;}
+      tr:hover {background-color: #f5f5f5;}
+      .total-row {background-color: #e6f2ff; font-weight: bold;}
+      .winning-content {color: #009900; font-weight: bold;}       /* 초록: 위닝 콘텐츠 */
+      .medium-performance {color: #FFD700; font-weight: bold;}      /* 노랑: 고성과 콘텐츠 */
+      .third-performance {color: #FF9900; font-weight: bold;}         /* 주황: 성과 콘텐츠 */
+      .needs-improvement {color: #FF0000; font-weight: bold;}         /* 빨강: 개선 필요! */
+      a {text-decoration: none; color: inherit;}
     </style>
     <table>
       <tr>
@@ -311,13 +323,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         <th>구매 수</th>
         <th>구매당 비용</th>
         <th>광고 성과</th>
-        <th>광고 이미지</th>
+        <th>광고 콘텐츠</th>
+        <th>콘텐츠 유형</th>
       </tr>
     """
     for _, row in df_sorted.iterrows():
         row_class = 'total-row' if row['광고명'] == '합계' else ''
         performance_text = row.get('광고 성과', '')
-        # 광고 성과에 따라 CSS 클래스 결정
         if performance_text == '위닝 콘텐츠':
             performance_class = 'winning-content'
         elif performance_text == '고성과 콘텐츠':
@@ -328,11 +340,14 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             performance_class = 'needs-improvement'
         else:
             performance_class = ''
-        img_url = row.get("image_url", "")
+        # 광고 콘텐츠: <a> 태그로 감싸 클릭 시 원본 URL 열기
+        img_url = row.get("광고 콘텐츠", "")
         if pd.notna(img_url) and img_url != "":
-            img_tag = f'<a href="{img_url}" target="_blank"><img src="{img_url}" style="max-width:100px; max-height:100px;"></a>'
+            media_tag = f'<a href="{img_url}" target="_blank"><img src="{img_url}" style="max-width:100px; max-height:100px;"></a>'
         else:
-            img_tag = ""
+            media_tag = ""
+        # 콘텐츠 유형: 그대로 표기
+        content_type = row.get("콘텐츠 유형", "")
         html_table += f"""
         <tr class="{row_class}">
           <td>{row.get('광고명','')}</td>
@@ -346,7 +361,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
           <td>{format_number(row.get('구매 수',0))}</td>
           <td>{format_number(row.get('구매당 비용',0))}</td>
           <td class="{performance_class}">{performance_text}</td>
-          <td>{img_tag}</td>
+          <td>{media_tag}</td>
+          <td>{content_type}</td>
         </tr>
         """
     html_table += "</table>"
