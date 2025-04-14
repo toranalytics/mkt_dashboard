@@ -20,16 +20,18 @@
       <input type="date" id="end-date">
     </div>
 
-    <!-- 패스워드 입력란 추가 -->
     <div class="form-group">
       <label for="report-password">패스워드:</label>
       <input type="password" id="report-password" placeholder="패스워드를 입력하세요.">
     </div>
 
+    <div class="form-group" id="account-selector-container" style="margin-top: 10px; margin-bottom: 15px;">
+      </div>
+
     <button onclick="generateReport()">보고서 생성</button>
 
-    <div id="error-message"></div>
-    <div id="report-result"></div>
+    <div id="error-message" style="margin-top: 15px; color: red;"></div>
+    <div id="report-result" style="margin-top: 20px;"></div>
   </div>
 
   <script src="script.js"></script>
