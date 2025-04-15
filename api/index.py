@@ -614,8 +614,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
           <td>{format_number(row.get('Click',0))}</td> <td>{row.get('CTR','0%')}</td>
           <td>{format_currency(row.get('CPC',0))}</td> <td>{format_number(row.get('구매 수',0))}</td>
           <td>{format_currency(row.get('구매당 비용',0))}</td>
-          <td>{format_currency(row.get('구매 전환 값',0))}</td> {/* --- 구매 전환 값 --- */}
-          <td>{format_roas(row.get('ROAS',0))}</td> {/* --- ROAS --- */}
+          <td>{format_currency(row.get('구매 전환 값',0))}</td> 
+          <td>{format_roas(row.get('ROAS',0))}</td> 
           <td class="{performance_class}">{performance_text}</td>
           <td>{row.get('콘텐츠 유형','')}</td> <td class="ad-content-cell">{content_tag}</td>
         </tr>
