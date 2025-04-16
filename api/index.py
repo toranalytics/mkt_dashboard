@@ -12,11 +12,8 @@ from flask import Flask, jsonify, request
 import re
 
 # --- Cafe24 API 모듈 import ---
+# cafe24_api.py 파일이 같은 폴더에 있어야 함
 from .cafe24_api import CAFE24_CONFIGS, process_cafe24_data
-
-# .env 파일 로드 (필요시)
-# from dotenv import load_dotenv
-# load_dotenv()
 
 app = Flask(__name__)
 
@@ -72,7 +69,7 @@ def get_accounts():
         traceback.print_exc()
         return jsonify({"error": "Failed to retrieve account list."}), 500
 
-# --- 보고서 생성 API (HTML 후처리 방식, ROAS/구매값 제거) ---
+# --- 보고서 생성 API (최종 수정 버전) ---
 @app.route('/api/generate-report', methods=['POST'])
 def generate_report():
     if request.method == 'OPTIONS': return jsonify({}), 200
@@ -104,39 +101,30 @@ def generate_report():
 
         meta_api_version = "v19.0"
 
-        # --- 1. Meta 광고 데이터 가져오기 (ROAS/구매값 관련 제거) ---
-        print(f"Fetching Meta Ads data for '{selected_account_key}' (ID: {meta_account_id})...")
-        # fetch 함수는 이제 Cafe24 데이터와 무관
-        meta_result = fetch_and_format_facebook_ads_data(start_date, end_date, meta_api_version, meta_account_id, meta_token)
-        print("Meta Ads data fetch and processing completed.")
-
-        # --- 2. Cafe24 총계 데이터 가져오기 ---
+        # --- 1. Cafe24 총계 데이터 가져오기 ---
         cafe24_totals = {"total_visitors": 0, "total_sales": 0} # 기본값
-        selected_cafe24_config = CAFE24_CONFIGS.get(selected_account_key)
+        selected_cafe24_config = CAFE24_CONFIGS.get(selected_account_key) # Meta 키로 Cafe24 설정 조회
 
         if selected_cafe24_config:
             print(f"Fetching Cafe24 totals for '{selected_account_key}'...")
             # cafe24_api 모듈의 함수 호출 (기간 총계 반환)
             cafe24_totals = process_cafe24_data(selected_account_key, selected_cafe24_config, start_date, end_date)
-            print("Cafe24 totals fetch attempted.")
+            print(f"Cafe24 totals fetch attempted. Visitors: {cafe24_totals.get('total_visitors')}, Sales: {cafe24_totals.get('total_sales')}")
         else:
             print(f"Cafe24 config not found for '{selected_account_key}', skipping Cafe24 totals fetch.")
 
-        # --- 3. Meta HTML 테이블 후처리 (ROAS/구매값 제거된 기준) ---
-        modified_html_table = add_cafe24_totals_to_html(
-            meta_result.get("html_table", ""), # 원본 Meta HTML
-            cafe24_totals.get("total_visitors", 0),
-            cafe24_totals.get("total_sales", 0)
+        # --- 2. Meta 광고 데이터 가져오기 및 최종 보고서 생성 ---
+        print(f"Fetching Meta Ads data for '{selected_account_key}' (ID: {meta_account_id})...")
+        # fetch 함수에 cafe24 총계 데이터 전달
+        final_result = fetch_and_format_facebook_ads_data(
+            start_date, end_date, meta_api_version, meta_account_id, meta_token,
+            cafe24_totals # Cafe24 총계 딕셔너리 전달
         )
+        print("Meta Ads data fetch and report generation completed.")
 
-        # --- 4. 최종 결과 조합 ---
-        final_result = {
-            "meta_report": {
-                 "html_table": modified_html_table, # 수정된 HTML
-                 "data": meta_result.get("data", []) # 원본 Meta 데이터 (ROAS/구매값 제외됨)
-             },
-            "cafe24_totals": cafe24_totals # Cafe24 총계는 별도 전달
-        }
+        # --- 3. 결과 반환 ---
+        # 최종 결과에 Cafe24 총계 정보를 추가하여 반환 (프론트엔드에서 별도 사용 가능)
+        final_result["cafe24_totals"] = cafe24_totals
         print("--- Report generation complete ---")
         return jsonify(final_result)
 
@@ -147,97 +135,28 @@ def generate_report():
         return jsonify({"error": error_message}), 500
 
 
-# --- HTML 테이블 후처리 함수 (ROAS/구매값 제거 기준 수정) ---
-def add_cafe24_totals_to_html(original_html, total_visitors, total_sales):
-    """Meta HTML 테이블에 Cafe24 총 방문자/매출 컬럼 및 데이터를 추가 (합계 행에만 값 표시)."""
-    if not original_html or not isinstance(original_html, str): return original_html
-
-    def format_num(num): return f"{int(num):,}" if pd.notna(num) else "0"
-    def format_curr(amount): return f"{int(amount):,} ₩" if pd.notna(amount) else "0 ₩"
-
-    try:
-        # 1. 헤더(th) 추가: '구매당 비용 (Meta)' 뒤에 추가
-        header_find = "<th>구매당 비용 (Meta)</th>"
-        header_add = """
-          <th>Cafe24 방문자 수</th>
-          <th>Cafe24 매출</th>
-        """
-        # thead 내부의 마지막 th 를 찾아 그 뒤에 삽입 시도 (더 안정적)
-        thead_end = original_html.find("</thead>")
-        if thead_end == -1: return original_html # thead 없으면 처리 불가
-        tr_header_start = original_html.rfind("<tr>", 0, thead_end)
-        tr_header_end = original_html.find("</tr>", tr_header_start)
-        if tr_header_start == -1 or tr_header_end == -1: return original_html
-
-        last_th_index = original_html.rfind("</th>", tr_header_start, tr_header_end)
-        if last_th_index == -1: return original_html
-
-        insert_pos_th = last_th_index + len("</th>")
-        modified_html = original_html[:insert_pos_th] + header_add + original_html[insert_pos_th:]
-
-
-        # 2. 데이터 행(td) 추가
-        rows = modified_html.split('<tr')
-        new_rows = []
-        for i, row_part in enumerate(rows):
-            if i == 0: new_rows.append(row_part); continue
-            row_html = "<tr" + row_part
-
-            # thead 안의 행은 건너뛰기
-            if "<th>" in row_html:
-                new_rows.append(row_html)
-                continue
-
-            # '구매당 비용 (Meta)' 컬럼의 닫는 td 태그 찾기
-            # 컬럼 순서: 광고명(1),캠페인명(2),광고세트명(3),비용(4),노출(5),클릭(6),CTR(7),CPC(8),구매수(9),구매당비용(10)
-            # 10번째 </td> 뒤에 삽입
-            td_parts = row_html.split("</td>")
-            if len(td_parts) > 10: # 컬럼이 충분히 있는지 확인 (헤더 포함 최소 11개 파트)
-                insert_pos_td = row_html.find(td_parts[10]) + len(td_parts[10]) + len("</td>") # 10번째 </td> 뒤
-
-                is_total_row = 'class="total-row"' in row_html or '>합계<' in td_parts[0] # 합계 행 확인
-
-                if is_total_row:
-                    td_add = f"<td>{format_num(total_visitors)}</td><td>{format_curr(total_sales)}</td>"
-                else:
-                    td_add = "<td>-</td><td>-</td>" # 빈 칸
-
-                row_html = row_html[:insert_pos_td] + td_add + row_html[insert_pos_td:]
-            else:
-                 print(f"Warning: Could not find enough <td> tags in row {i} for Cafe24 data insertion.")
-                 # 빈칸이라도 추가 시도 (구조 깨짐 방지)
-                 last_td_index = row_html.rfind("</td>")
-                 if last_td_index != -1:
-                      insert_pos = last_td_index + len("</td>")
-                      row_html = row_html[:insert_pos] + "<td>-</td><td>-</td>" + row_html[insert_pos:]
-
-
-            new_rows.append(row_html)
-
-        return "".join(new_rows)
-
-    except Exception as e:
-        print(f"Error during HTML post-processing: {e}")
-        traceback.print_exc()
-        return original_html # 오류 시 원본 반환
-
 # --- 메타 광고 크리에이티브 관련 함수들 ---
-# (get_creative_details, get_video_source_url, fetch_creatives_parallel - 이전과 동일)
+# (이전과 동일)
 def get_creative_details(ad_id, ver, token):
-    # ... (이전 코드 전체 내용) ...
+    # ... (이전 코드 복사) ...
     pass
 def get_video_source_url(video_id, ver, token):
-     # ... (이전 코드 전체 내용) ...
+     # ... (이전 코드 복사) ...
     pass
 def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
-     # ... (이전 코드 전체 내용) ...
+     # ... (이전 코드 복사) ...
     pass
 
-# --- 메타 광고 데이터 가져오기 및 포맷 함수 (ROAS/구매값 제거 버전) ---
-def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
-    """Facebook Insights API 데이터를 가져와 포맷합니다. (ROAS/구매값 제외)"""
+# --- 메타 광고 데이터 가져오기 및 최종 보고서 생성 함수 (최종 수정본) ---
+def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token, cafe24_totals):
+    """
+    Facebook Insights API 데이터를 가져와 포맷하고,
+    HTML 테이블의 합계 행에 Cafe24 총계 데이터를 추가합니다.
+    ROAS와 구매 전환 값은 제외됩니다.
+    cafe24_totals: {"total_visitors": int, "total_sales": int} 형태의 딕셔너리
+    """
     all_records = []
-    # API 요청 필드에서 action_values 제거 (구매 값 필요 없음)
+    # API 요청 필드 (action_values 제외, actions는 구매 수 위해 유지)
     metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions'
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
     params = { 'fields': metrics, 'access_token': token, 'level': 'ad',
@@ -262,7 +181,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     print(f"Finished fetching Meta Ads pages. Total {len(all_records)} records found.")
     if not all_records: return {"html_table": "<p>Meta 광고 데이터 없음.</p>", "data": []}
 
-    # 데이터 집계 (ad_id 기준, 구매 값 관련 제거)
+    # 데이터 집계 (ROAS/구매값 제외)
     ad_data = {}
     for record in all_records:
         ad_id = record.get('ad_id');
@@ -271,10 +190,9 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             ad_data[ad_id] = {
                 'ad_id': ad_id, 'ad_name': record.get('ad_name'),
                 'campaign_name': record.get('campaign_name'), 'adset_name': record.get('adset_name'),
-                'spend': 0.0, 'impressions': 0, 'link_clicks': 0,
-                'purchase_count': 0 # 구매 수만 집계
+                'spend': 0.0, 'impressions': 0, 'link_clicks': 0, 'purchase_count': 0
             }
-        # 수치 데이터 누적
+        # 수치 누적
         try: ad_data[ad_id]['spend'] += float(record.get('spend', 0))
         except: pass
         try: ad_data[ad_id]['impressions'] += int(record.get('impressions', 0))
@@ -290,7 +208,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                     try: purchase_count_on_record += int(action.get("value", 0))
                     except: pass
         ad_data[ad_id]['purchase_count'] += purchase_count_on_record
-        # 텍스트 정보 업데이트
+        # 텍스트 업데이트
         ad_data[ad_id]['ad_name'] = record.get('ad_name') or ad_data[ad_id]['ad_name']
         ad_data[ad_id]['campaign_name'] = record.get('campaign_name') or ad_data[ad_id]['campaign_name']
         ad_data[ad_id]['adset_name'] = record.get('adset_name') or ad_data[ad_id]['adset_name']
@@ -309,72 +227,76 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     df['target_url'] = df['creative_details'].apply(lambda x: x.get('target_url', ''))
     df = df.drop(columns=['creative_details'])
 
-    # 숫자형 변환 (구매 값 관련 제거)
+    # 숫자형 변환
     numeric_cols = ['spend', 'impressions', 'link_clicks', 'purchase_count']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(0).astype(int)
 
-    # 계산 지표 생성 (ROAS/구매값 관련 제거)
+    # 계산 지표 생성
     df['CTR'] = df.apply(lambda r: f"{(r['link_clicks'] / r['impressions'] * 100):.2f}%" if r['impressions'] > 0 else '0.00%', axis=1)
     df['CPC'] = df.apply(lambda r: int(round(r['spend'] / r['link_clicks'])) if r['link_clicks'] > 0 else 0, axis=1)
-    df['구매당 비용 (Meta)'] = df.apply(lambda r: int(round(r['spend'] / r['purchase_count'])) if r['purchase_count'] > 0 else 0, axis=1)
+    df['구매당 비용'] = df.apply(lambda r: int(round(r['spend'] / r['purchase_count'])) if r['purchase_count'] > 0 else 0, axis=1) # 이름에서 (Meta) 제거
 
-    # 컬럼 이름 변경 (ROAS/구매값 관련 제거)
+    # 컬럼 이름 변경
     df = df.rename(columns={
         'ad_name': '광고명', 'campaign_name': '캠페인명', 'adset_name': '광고세트명',
         'spend': 'FB 광고비용', 'impressions': '노출', 'link_clicks': 'Click',
-        'purchase_count': '구매 수 (Meta)' # 이름 변경
+        'purchase_count': '구매 수' # 이름에서 (Meta) 제거
     })
 
-    # 합계 행 계산 (ROAS/구매값 관련 제거)
+    # 합계 행 계산
     total_spend = df['FB 광고비용'].sum(); total_impressions = df['노출'].sum(); total_clicks = df['Click'].sum()
-    total_meta_purchases = df['구매 수 (Meta)'].sum()
+    total_purchases = df['구매 수'].sum()
     total_ctr = f"{(total_clicks / total_impressions * 100):.2f}%" if total_impressions > 0 else '0.00%'
     total_cpc = int(round(total_spend / total_clicks)) if total_clicks > 0 else 0
-    total_meta_cpp = int(round(total_spend / total_meta_purchases)) if total_meta_purchases > 0 else 0
+    total_cpp = int(round(total_spend / total_purchases)) if total_purchases > 0 else 0
 
-    # 합계 행 Series (ROAS/구매값 관련 제거)
+    # --- 합계 행 Series 생성 (Cafe24 총계 값 포함) ---
     totals_data = {
         '광고명': '합계', '캠페인명': '', '광고세트명': '',
         'FB 광고비용': total_spend, '노출': total_impressions, 'Click': total_clicks,
-        'CTR': total_ctr, 'CPC': total_cpc, '구매 수 (Meta)': total_meta_purchases,
-        '구매당 비용 (Meta)': total_meta_cpp,
+        'CTR': total_ctr, 'CPC': total_cpc, '구매 수': total_purchases,
+        '구매당 비용': total_cpp,
+        'Cafe24 방문자 수': cafe24_totals.get('total_visitors', 0), # 전달받은 총계 사용
+        'Cafe24 매출': cafe24_totals.get('total_sales', 0),      # 전달받은 총계 사용
         'ad_id': '', '콘텐츠 유형': '', 'display_url': '', 'target_url': '', '광고 성과': ''
     }
-    totals_row = pd.Series(totals_data)
-
-    # 컬럼 순서 정의 (ROAS/구매값 관련 제거)
+    # --- 최종 컬럼 순서 정의 ---
     column_order = [
         '광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click',
-        'CTR', 'CPC', '구매 수 (Meta)', '구매당 비용 (Meta)',
+        'CTR', 'CPC', '구매 수', '구매당 비용',
+        'Cafe24 방문자 수', 'Cafe24 매출', # <-- Cafe24 컬럼 위치
         'ad_id', '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
     ]
-    df['광고 성과'] = ''
-    # 컬럼 순서 적용 시점에 totals_row 와 df 의 컬럼이 일치해야 함
-    df = df[[col for col in column_order if col in df.columns]] # df에 있는 컬럼만 순서 적용
+    totals_row = pd.Series(totals_data)
+
+    df['광고 성과'] = '' # 컬럼 미리 생성
+    # 컬럼 순서 적용 (df에는 아직 Cafe24 컬럼 없음)
+    df_meta_columns = [col for col in column_order if col in df.columns and col not in ['Cafe24 방문자 수', 'Cafe24 매출']]
+    df = df[df_meta_columns]
 
     # 합계 행 추가 및 정렬
     df_with_total = pd.concat([pd.DataFrame([totals_row]), df], ignore_index=True)
     def custom_sort_key(row):
         if row['광고명'] == '합계': return -1
-        cost = pd.to_numeric(row.get('구매당 비용 (Meta)', 0), errors='coerce')
+        cost = pd.to_numeric(row.get('구매당 비용', 0), errors='coerce')
         return float('inf') if pd.isna(cost) or cost == 0 else cost
     df_with_total['sort_key'] = df_with_total.apply(custom_sort_key, axis=1)
     url_map = df.set_index('ad_id')[['display_url', 'target_url']].to_dict('index') if 'ad_id' in df.columns else {}
+    # 정렬 후 sort_key 제거, URL 컬럼은 나중에 추가
     df_sorted = df_with_total.sort_values(by='sort_key', ascending=True).drop(columns=['sort_key', 'display_url', 'target_url'], errors='ignore')
 
     # 광고 성과 분류
-    # ... (분류 로직은 구매당 비용 (Meta) 기준으로 유지) ...
     df_non_total = df_sorted[df_sorted['광고명'] != '합계'].copy()
-    df_valid_cost = df_non_total[pd.to_numeric(df_non_total['구매당 비용 (Meta)'], errors='coerce').fillna(float('inf')) > 0].copy()
+    df_valid_cost = df_non_total[pd.to_numeric(df_non_total['구매당 비용'], errors='coerce').fillna(float('inf')) > 0].copy()
     top_ad_ids = []
     if not df_valid_cost.empty and 'ad_id' in df_valid_cost.columns:
-         df_valid_cost['구매당 비용_num'] = pd.to_numeric(df_valid_cost['구매당 비용 (Meta)'])
+         df_valid_cost['구매당 비용_num'] = pd.to_numeric(df_valid_cost['구매당 비용'])
          df_rank_candidates = df_valid_cost[df_valid_cost['구매당 비용_num'] < 100000].sort_values(by='구매당 비용_num', ascending=True)
          top_ad_ids = df_rank_candidates.head(3)['ad_id'].tolist()
     def categorize_performance(row): # 성과 분류 함수
         if row['광고명'] == '합계': return ''
-        ad_id_current = row.get('ad_id'); cost = pd.to_numeric(row.get('구매당 비용 (Meta)', float('inf')), errors='coerce')
+        ad_id_current = row.get('ad_id'); cost = pd.to_numeric(row.get('구매당 비용', float('inf')), errors='coerce')
         if pd.isna(cost) or cost == 0: return '';
         if cost >= 100000: return '개선 필요!'
         if ad_id_current in top_ad_ids:
@@ -387,14 +309,22 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     if 'ad_id' in df_sorted.columns: df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1)
     else: df_sorted['광고 성과'] = ''
 
-
     # URL 재매핑
     df_sorted['display_url'] = df_sorted['ad_id'].map(lambda x: url_map.get(x, {}).get('display_url', '')) if 'ad_id' in df_sorted.columns else ''
     df_sorted['target_url'] = df_sorted['ad_id'].map(lambda x: url_map.get(x, {}).get('target_url', '')) if 'ad_id' in df_sorted.columns else ''
 
-    # HTML 테이블 생성 (ROAS/구매값 제외 버전)
+
+    # --- HTML 테이블 생성 (Cafe24 컬럼 포함 및 값 처리) ---
     def format_currency(amount): return f"{int(amount):,} ₩" if pd.notna(amount) else "0 ₩"
     def format_number(num): return f"{int(num):,}" if pd.notna(num) else "0"
+
+    # 최종 테이블 컬럼 순서 (HTML 생성용)
+    display_columns = [
+        '광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click',
+        'CTR', 'CPC', '구매 수', '구매당 비용',
+        'Cafe24 방문자 수', 'Cafe24 매출', # <-- Cafe24 컬럼 포함
+        '광고 성과', '콘텐츠 유형', '광고 콘텐츠'
+    ]
 
     html_table = """
     <style> /* ... CSS ... */ </style>
@@ -402,50 +332,78 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
       <thead>
         <tr>
           <th>광고명</th> <th>캠페인명</th> <th>광고세트명</th> <th>FB 광고비용</th>
-          <th>노출</th> <th>Click</th> <th>CTR</th> <th>CPC</th> <th>구매 수 (Meta)</th>
-          <th>구매당 비용 (Meta)</th>
-          {/* Cafe24 헤더는 후처리에서 추가됨 */}
+          <th>노출</th> <th>Click</th> <th>CTR</th> <th>CPC</th> <th>구매 수</th>
+          <th>구매당 비용</th>
+          <th>Cafe24 방문자 수</th><th>Cafe24 매출</th> {/* <-- 헤더 추가 */}
           <th>광고 성과</th> <th>콘텐츠 유형</th> <th>광고 콘텐츠</th>
         </tr>
       </thead>
       <tbody>
     """
-    iter_df = df_sorted
-    for index, row in iter_df.iterrows():
+    # df_sorted 를 사용하여 행 생성
+    for index, row in df_sorted.iterrows():
         row_class = 'total-row' if row.get('광고명') == '합계' else ''
         performance_text = row.get('광고 성과', '')
-        performance_class = '' # 클래스 지정 로직 필요
-        content_tag = "" # 콘텐츠 태그 생성 로직 필요
+        performance_class = ''
+        if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'
+        elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'
+        elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'
+        elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
 
-        html_table += f"""
-        <tr class="{row_class}">
-          <td>{row.get('광고명','')}</td><td>{row.get('캠페인명','')}</td><td>{row.get('광고세트명','')}</td>
-          <td>{format_currency(row.get('FB 광고비용',0))}</td><td>{format_number(row.get('노출',0))}</td>
-          <td>{format_number(row.get('Click',0))}</td><td>{row.get('CTR','0.00%')}</td>
-          <td>{format_currency(row.get('CPC',0))}</td><td>{format_number(row.get('구매 수 (Meta)',0))}</td>
-          <td>{format_currency(row.get('구매당 비용 (Meta)',0))}</td>
-          <td class="{performance_class}">{performance_text}</td><td>{row.get('콘텐츠 유형','-')}</td>
-          <td class="ad-content-cell">{content_tag}</td>
-        </tr>
-        """
+        # 콘텐츠 태그 생성
+        display_url = row.get('display_url', ''); target_url = row.get('target_url', '')
+        content_tag = ""; img_tag = ""
+        if display_url:
+            img_tag = f'<img src="{display_url}" class="ad-content-thumbnail" alt="콘텐츠 썸네일">'
+            if isinstance(target_url, str) and target_url.startswith('http'): content_tag = f'<a href="{target_url}" target="_blank" title="콘텐츠 보기">{img_tag}</a>'
+            else: content_tag = img_tag
+        elif row.get('광고명') != '합계': content_tag = "-"
+
+        # 행 HTML 생성
+        html_table += f'<tr class="{row_class}">'
+        for col in display_columns: # 정의된 순서대로 셀 생성
+             if col == 'FB 광고비용' or col == 'CPC' or col == '구매당 비용' or col == 'Cafe24 매출':
+                 value = format_currency(row.get(col)) if row.get('광고명') == '합계' or col != 'Cafe24 매출' else '-' # 합계 행 Cafe24 매출만 포맷, 나머진 '-'
+                 if col == 'Cafe24 매출' and row.get('광고명') == '합계': value = format_currency(row.get(col)) # 합계행 매출 포맷
+                 elif col == 'Cafe24 매출': value = '-' # 광고행 매출은 '-'
+
+             elif col == '노출' or col == 'Click' or col == '구매 수' or col == 'Cafe24 방문자 수':
+                 value = format_number(row.get(col)) if row.get('광고명') == '합계' or col != 'Cafe24 방문자 수' else '-' # 합계 행 Cafe24 방문자수만 포맷, 나머진 '-'
+                 if col == 'Cafe24 방문자 수' and row.get('광고명') == '합계': value = format_number(row.get(col)) # 합계행 방문자 포맷
+                 elif col == 'Cafe24 방문자 수': value = '-' # 광고행 방문자수는 '-'
+
+             elif col == 'CTR': value = row.get(col, '0.00%')
+             elif col == '광고 성과': value = f'<td class="{performance_class}">{performance_text}</td>'; html_table += value; continue # 클래스 포함하여 직접 추가
+             elif col == '콘텐츠 유형': value = row.get(col, '-')
+             elif col == '광고 콘텐츠': value = f'<td class="ad-content-cell">{content_tag}</td>'; html_table += value; continue # 클래스 포함하여 직접 추가
+             else: value = row.get(col, '') # 광고명, 캠페인명 등
+
+             # 정렬 클래스 적용
+             td_align = 'left' if col in ['광고명', '캠페인명', '광고세트명'] else ('center' if col in ['광고 성과', '콘텐츠 유형'] else 'right')
+             html_table += f'<td style="text-align: {td_align};">{value}</td>'
+
+        html_table += "</tr>\n"
     html_table += "</tbody></table>"
 
     # JSON 데이터 준비 (ROAS/구매값 제외)
-    final_columns_for_json = [col for col in df_sorted.columns if col not in ['ad_id', 'display_url', 'target_url']]
-    df_for_json = df_sorted[final_columns_for_json]
-    def clean_numeric(data): # NaN/Inf/타입 정리
+    final_columns_for_json = [col for col in display_columns if col not in ['ad_id', 'display_url', 'target_url', '광고 콘텐츠']] # JSON에는 실제 데이터 컬럼 위주로
+    df_for_json = df_sorted[final_columns_for_json].copy() # .copy() 추가
+
+    # clean_numeric 함수 정의 (여기 또는 외부에 정의 필요)
+    def clean_numeric(data):
         if isinstance(data, dict): return {k: clean_numeric(v) for k, v in data.items()}
         elif isinstance(data, list): return [clean_numeric(item) for item in data]
         elif isinstance(data, (int, float)):
             if math.isinf(data) or math.isnan(data): return 0
-            if hasattr(data, 'item'): return data.item() # Handle numpy types
+            if hasattr(data, 'item'): return data.item()
             return data
         elif isinstance(data, (pd.Timestamp, date)): return data.isoformat()
-        elif hasattr(data, 'item'): # Handle other numpy types
+        elif hasattr(data, 'item'):
              try: return data.item()
              except: return str(data)
         elif not isinstance(data, (str, bool)) and data is not None: return str(data)
         return data
+
     records = df_for_json.to_dict(orient='records')
     cleaned_records = clean_numeric(records)
 
