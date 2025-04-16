@@ -7,40 +7,46 @@ import traceback
 import time # 캐시 키 생성 시간 비교용
 
 # --- Cafe24 설정 로드 (여러 계정 지원) ---
-def load_cafe24_configs():
-    """환경 변수에서 여러 Cafe24 설정을 로드합니다."""
-    configs = {}
-    i = 1
-    while True:
-        # 설정 이름으로 매칭하기 위해 NAME 필드 필수
-        name = os.environ.get(f"CAFE24_CONFIG_{i}_NAME")
-        mall_id = os.environ.get(f"CAFE24_CONFIG_{i}_MALL_ID")
-        client_id = os.environ.get(f"CAFE24_CONFIG_{i}_CLIENT_ID")
-        client_secret = os.environ.get(f"CAFE24_CONFIG_{i}_CLIENT_SECRET")
-        refresh_token = os.environ.get(f"CAFE24_CONFIG_{i}_REFRESH_TOKEN")
+def process_cafe24_data(config_key, config, start_date, end_date):
+    """
+    지정된 기간의 Cafe24 총 방문자 수와 총 매출액을 계산하여 반환합니다.
+    """
+    total_visitors = 0
+    total_sales = 0
 
-        # 필수 값들이 모두 있는지 확인 (NAME, MALL_ID, CLIENT_ID, SECRET, REFRESH_TOKEN)
-        if name and mall_id and client_id and client_secret and refresh_token:
-            config_key = name # 설정을 구분하는 키로 NAME 사용
-            configs[config_key] = {
-                "mall_id": mall_id,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": refresh_token,
-                "name": name # 필요시 내부에서도 이름 사용
-            }
-            print(f"Loaded Cafe24 config: {name} (Mall ID: {mall_id})")
-            i += 1
-        else:
-            # 하나라도 없으면 더 이상 설정이 없는 것으로 간주하고 중단
-            if i == 1 and not name: # 첫 번째 설정 이름조차 없으면 바로 중단
-                 pass
-            elif name or mall_id or client_id or client_secret or refresh_token: # 일부만 있으면 경고
-                 print(f"Warning: Incomplete Cafe24 configuration found for index {i}. Skipping.")
-            break # 다음 인덱스로 넘어가지 않음
-    if not configs:
-        print("Warning: No complete Cafe24 configurations found in environment variables.")
-    return configs
+    # 1. 총 방문자 수 계산
+    print(f"--- Calculating Total Cafe24 Visitors for '{config_key}' ---")
+    visitors_data = get_visitors_dailyactive(config_key, config, start_date, end_date)
+    if visitors_data and 'dailyactive' in visitors_data:
+        for item in visitors_data['dailyactive']:
+            total_visitors += item.get('user_count', 0)
+        print(f"Calculated total visitors: {total_visitors}")
+    else:
+        print(f"Could not retrieve visitor data for '{config_key}'. Total visitors set to 0.")
+
+    # 2. 총 매출액 계산
+    print(f"--- Calculating Total Cafe24 Sales for '{config_key}' ---")
+    orders_data = get_sales_orderdetails(config_key, config, start_date, end_date)
+    if orders_data and 'orderdetails' in orders_data:
+        current_total_sales = 0
+        order_count = len(orders_data['orderdetails'])
+        for order in orders_data['orderdetails']:
+            order_amount = order.get('order_amount', 0)
+            try:
+                # 금액 형변환 시도
+                current_total_sales += int(float(order_amount))
+            except (ValueError, TypeError) as e:
+                 order_id = order.get('order_id', 'N/A')
+                 print(f"Warning: Invalid order amount '{order_amount}' for order {order_id}. Skipping.")
+                 continue
+        total_sales = current_total_sales
+        print(f"Calculated total sales from {order_count} orders: {total_sales}")
+    else:
+        print(f"Could not retrieve order details data for '{config_key}'. Total sales set to 0.")
+
+    print(f"--- Finished calculating Cafe24 totals for '{config_key}' ---")
+
+    return {"total_visitors": total_visitors, "total_sales": total_sales}
 
 # 모듈 로드 시 설정 로드
 CAFE24_CONFIGS = load_cafe24_configs()
