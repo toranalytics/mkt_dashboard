@@ -412,7 +412,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
           <td>{format_currency(row.get('CPC',0))}</td><td>{format_number(row.get('구매 수 (Meta)',0))}</td>
           <td>{format_currency(row.get('구매당 비용 (Meta)',0))}</td><td>{format_currency(row.get('구매 전환 값 (Meta)',0))}</td>
           <td>{format_roas(row.get('ROAS (Meta)',0))}</td>
-          {/* Cafe24 데이터 셀은 후처리에서 추가됨 */}
+          
           <td class="{performance_class}">{performance_text}</td><td>{row.get('콘텐츠 유형','-')}</td>
           <td class="ad-content-cell">{content_tag}</td>
         </tr>
