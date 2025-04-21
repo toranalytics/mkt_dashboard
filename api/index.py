@@ -377,7 +377,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         return {"html_table": empty_html, "data": [], "cafe24_totals": cafe24_totals}
 
 
-    # 데이터 집계 (ad_id 기준)
+# 데이터 집계 (ad_id 기준)
     ad_data = {}
     for record in all_records:
         ad_id = record.get('ad_id');
@@ -391,29 +391,52 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 'adset_name': record.get('adset_name'),
                 'spend': 0.0,
                 'impressions': 0,
-                'link_clicks': 0, # 'clicks' 필드는 모든 종류의 클릭 포함, 'link_clicks'는 별도 요청 필요하거나 actions 에서 찾아야 함
+                'link_clicks': 0, # 'clicks' 필드는 모든 종류의 클릭 포함, 필요 시 수정
                 'purchase_count': 0
             }
 
+        # spend, impressions, clicks 집계 (이 부분은 변경 없음)
         try: ad_data[ad_id]['spend'] += float(record.get('spend', 0))
         except (ValueError, TypeError): pass
         try: ad_data[ad_id]['impressions'] += int(record.get('impressions', 0))
         except (ValueError, TypeError): pass
-        try: ad_data[ad_id]['link_clicks'] += int(record.get('clicks', 0)) # 우선 'clicks' 사용, 필요 시 수정
+        try: ad_data[ad_id]['link_clicks'] += int(record.get('clicks', 0)) # 우선 'clicks' 사용
         except (ValueError, TypeError): pass
 
-        # 구매 수 집계 (actions 필드 활용)
-        purchase_count_on_record = 0
-        actions = record.get('actions', {}).get('data', []) # actions 구조 확인 필요
-        if isinstance(actions, list):
-            for action in actions:
-                # 'purchase' 액션 타입 확인 (실제 action_type 이름 확인 필요)
-                if action.get("action_type") == "purchase" or action.get("action_type") == "offsite_conversion.fb_pixel_purchase":
-                    try: purchase_count_on_record += int(action.get("value", 0))
-                    except (ValueError, TypeError): pass
-        ad_data[ad_id]['purchase_count'] += purchase_count_on_record
+        # --- ⬇️ 구매 수 집계 로직 수정 (AttributeError 해결) ⬇️ ---
+        actions_data = record.get('actions') # 'actions' 필드를 먼저 가져옴
+        actions_list = [] # 기본값은 빈 리스트
 
-        # 이름 필드는 최신 레코드로 업데이트 (동일 ad_id 에 대해 여러 레코드 있을 경우 대비)
+        if isinstance(actions_data, dict):
+            # actions_data가 딕셔너리이면 'data' 키를 찾아 리스트를 가져옴
+            actions_list = actions_data.get('data', [])
+        elif isinstance(actions_data, list):
+            # actions_data가 이미 리스트이면 그대로 사용
+            actions_list = actions_data
+
+        # 혹시 예상치 못한 타입이 들어왔을 경우를 대비해 최종적으로 리스트인지 확인
+        if not isinstance(actions_list, list):
+            actions_list = []
+
+        # 구매 수 집계 (이제 안전하게 actions_list 사용)
+        purchase_count_on_record = 0
+        for action in actions_list:
+            # action이 딕셔너리 형태인지 한번 더 확인 (안전장치)
+            if not isinstance(action, dict): continue
+
+            action_type = action.get("action_type", "")
+            # 일반적인 구매 액션 타입들 (필요시 Meta 문서 참고하여 추가/수정)
+            if action_type == "purchase" or action_type == "offsite_conversion.fb_pixel_purchase" or action_type == "omni_purchase":
+                try:
+                    # value가 숫자 형태일 때만 변환 시도
+                    value_str = action.get("value", "0")
+                    purchase_count_on_record += int(float(value_str)) # 소수점 가능성 고려
+                except (ValueError, TypeError):
+                    pass # 숫자로 변환 불가 시 무시
+        ad_data[ad_id]['purchase_count'] += purchase_count_on_record # 집계된 구매 수를 ad_data에 더함
+        # --- ⬆️ 구매 수 집계 로직 수정 완료 ⬆️ ---
+
+        # 이름 필드는 최신 레코드로 업데이트 (이 부분은 변경 없음)
         ad_data[ad_id]['ad_name'] = record.get('ad_name') or ad_data[ad_id]['ad_name']
         ad_data[ad_id]['campaign_name'] = record.get('campaign_name') or ad_data[ad_id]['campaign_name']
         ad_data[ad_id]['adset_name'] = record.get('adset_name') or ad_data[ad_id]['adset_name']
