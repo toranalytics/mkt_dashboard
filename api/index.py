@@ -183,8 +183,8 @@ def get_creative_details(ad_id, ver, token):
                 # --- ⬆️ 요청 필드 대폭 간소화 ⬆️ ---
                 details_params = {'fields': fields, 'access_token': token}
                 details_response = requests.get(url=details_req_url, params=details_params, timeout=15)
-            details_response.raise_for_status()
-            details_data = details_response.json()
+                details_response.raise_for_status()
+                details_data = details_response.json()
 
             # --- ⬇️ [로깅 추가 1] API 원본 응답 출력 (디버깅용) ⬇️ ---
             print(f"--- Creative Details RAW RESPONSE for ad_id: {ad_id} (creative_id: {creative_id}) ---")
