@@ -436,11 +436,24 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             elif col in ['노출', 'Click', '구매 수', 'Cafe24 방문자 수']: value = format_number(row.get(col))
             elif col == 'CTR': value = row.get(col, '0.00%')
             elif col == '광고 성과':
-                performance_text = row.get(col, ''); performance_class = '';
-                if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'; elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'; elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'; elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
-                value = performance_text;
-                if performance_class: td_class.append(performance_class)
-                td_align = 'center'; td_class.append('text-center')
+                performance_text = row.get(col, '') # 광고 성과 텍스트 가져오기
+                performance_class = '' # CSS 클래스 초기화
+
+                # 여러 줄로 분리된 if/elif 문
+                if performance_text == '위닝 콘텐츠':
+                    performance_class = 'winning-content'
+                elif performance_text == '고성과 콘텐츠':
+                    performance_class = 'medium-performance'
+                elif performance_text == '성과 콘텐츠':
+                    performance_class = 'third-performance'
+                elif performance_text == '개선 필요!':
+                    performance_class = 'needs-improvement'
+                # else: # performance_class 는 이미 '' 로 초기화됨
+
+                value = performance_text # 셀에 표시될 값은 텍스트
+                if performance_class: # 클래스가 지정되었다면 td_class 리스트에 추가
+                    td_class.append(performance_class)
+                td_align = 'center'; td_class.append('text-center') # 가운데 정렬
             elif col == '콘텐츠 유형': value = row.get(col, '-') if not is_total_row else ''; td_align = 'center'; td_class.append('text-center')
             elif col == '광고 콘텐츠':
                 display_url = row.get('display_url', ''); target_url = row.get('target_url', '')
