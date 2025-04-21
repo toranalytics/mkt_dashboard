@@ -176,15 +176,15 @@ def get_creative_details(ad_id, ver, token):
         creative_id = creative_data.get('creative', {}).get('id')
 
         if creative_id:
-                # 2. Creative ID로 상세 정보 가져오기
-                details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-                # --- ⬇️ 요청 필드 대폭 간소화 ⬇️ ---
-                fields = 'object_type,image_url,thumbnail_url,video_id,object_story_spec{link_data{link,picture}},asset_feed_spec{videos{thumbnail_url},images{url}}' # 오류 유발 가능성 높은 필드 대거 제거
-                # --- ⬆️ 요청 필드 대폭 간소화 ⬆️ ---
-                details_params = {'fields': fields, 'access_token': token}
-                details_response = requests.get(url=details_req_url, params=details_params, timeout=15)
-                details_response.raise_for_status()
-                details_data = details_response.json()
+            # 2. Creative ID로 상세 정보 가져오기
+            details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
+            # --- 요청 필드 간소화 버전 ---
+            fields = 'object_type,image_url,thumbnail_url,video_id,object_story_spec{link_data{link,picture}},asset_feed_spec{videos{thumbnail_url},images{url}}'
+            # --- 요청 필드 간소화 버전 ---
+            details_params = {'fields': fields, 'access_token': token}
+            details_response = requests.get(url=details_req_url, params=details_params, timeout=15)
+            details_response.raise_for_status() # 들여쓰기 확인
+            details_data = details_response.json() # 들여쓰기 확인
 
             # --- ⬇️ [로깅 추가 1] API 원본 응답 출력 (디버깅용) ⬇️ ---
             print(f"--- Creative Details RAW RESPONSE for ad_id: {ad_id} (creative_id: {creative_id}) ---")
