@@ -87,36 +87,41 @@ def get_cafe24_access_token(config_key, config):
     # --- ⬇️ [필수 디버깅 로그] 사용 중인 Refresh Token 값 확인 ⬇️ ---
     print(f"DEBUG: Using Refresh Token starting with: {refresh_token[:5]}") # 보안상 앞 5자리만 출력
     # --- ⬆️ [필수 디버깅 로그] ---
-
+    
     try:
-        response = requests.post(token_url, data=token_data, headers=token_headers, timeout=15) # Add timeout
-        response_data = response.json() # Get JSON regardless of status code initially
+            response = requests.post(token_url, data=token_data, headers=token_headers, timeout=15)
+            response_data = response.json()
 
-        if response.status_code == 200 and "access_token" in response_data:
-            new_access_token = response_data["access_token"]
-            new_refresh_token = response_data.get("refresh_token") # 응답에 새 Refresh Token이 올 수도 있음
-            expires_in = response_data.get("expires_in", 3600) # Default 1 hour
+            if response.status_code == 200 and "access_token" in response_data:
+                new_access_token = response_data["access_token"]
+                new_refresh_token = response_data.get("refresh_token") # 새 Refresh Token 확인
+                expires_in = response_data.get("expires_in", 3600)
 
-            # Update Cache
-            cafe24_access_token_cache[config_key] = {
-                "token": new_access_token,
-                "expires_at": now + timedelta(seconds=expires_in)
-            }
-            print(f"Successfully refreshed Cafe24 access token for '{config_key}'.")
+                # Update Cache
+                cafe24_access_token_cache[config_key] = {
+                    "token": new_access_token,
+                    "expires_at": now + timedelta(seconds=expires_in)
+                }
+                print(f"Successfully refreshed Cafe24 access token for '{config_key}'.")
 
-            # 새 Refresh Token 처리 (중요)
-            if new_refresh_token and new_refresh_token != refresh_token:
-                print(f"IMPORTANT: Received a NEW refresh token for '{config_key}'. Update this in your Vercel environment variables!")
-                # Vercel 환경 변수는 여기서 직접 수정 불가. 로그 확인 후 수동 업데이트 필요.
-                config["refresh_token"] = new_refresh_token # 메모리 상에서는 업데이트 (다음 실행에는 영향 없음)
+                # --- ⬇️ 새 Refresh Token 로깅 개선 ⬇️ ---
+                if new_refresh_token and new_refresh_token != refresh_token:
+                    print("="*60)
+                    print(f"IMPORTANT! Received a NEW refresh token for '{config_key}'.")
+                    print("You MUST update the Vercel environment variable with this new token!")
+                    print(f">>> New Refresh Token Received: {new_refresh_token} <<<") # 새 토큰 값 직접 출력
+                    print("="*60)
+                    # 메모리 상의 config 값 업데이트 (다음번 실행에는 영향 없음)
+                    config["refresh_token"] = new_refresh_token
+                # --- ⬆️ 새 Refresh Token 로깅 개선 ⬆️ ---
 
-            return new_access_token
-        else:
-            print(f"Failed to refresh Cafe24 access token for '{config_key}'. Status: {response.status_code}, Response:")
-            print(json.dumps(response_data, indent=2))
-            if config_key in cafe24_access_token_cache: # 캐시 비우기
-                 del cafe24_access_token_cache[config_key]
-            return None # 실패 알림
+                return new_access_token
+            else:
+                # ... (갱신 실패 시 로직 동일) ...
+                print(f"Failed to refresh Cafe24 access token for '{config_key}'. Status: {response.status_code}, Response:")
+                print(json.dumps(response_data, indent=2))
+                if config_key in cafe24_access_token_cache: del cafe24_access_token_cache[config_key]
+                return None
     except requests.exceptions.RequestException as e:
         print(f"Network error during Cafe24 token refresh request for '{config_key}': {e}")
         if config_key in cafe24_access_token_cache: del cafe24_access_token_cache[config_key]
