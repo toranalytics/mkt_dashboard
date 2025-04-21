@@ -271,9 +271,11 @@ def process_cafe24_data(config_key, config, start_date, end_date):
                      temp_sales[date_str] = new_total
                      processed_order_items += 1
                  except (ValueError, TypeError) as e:
-                      # 로그 너무 많아지는 것 방지
-                      if i < 5 or i % 50 == 0: print(f"Skipping order {order_id} for '{config_key}' due to invalid date/amount: {e}")
-                     continue
+                  # 로그 너무 많아지는 것 방지
+                  if i < 5 or i % 50 == 0:
+                     print(f"Skipping order {order_id} for '{config_key}' due to invalid date/amount: {e}")
+                  # continue 문의 들여쓰기를 위 if 문과 같은 레벨로 맞춤
+                  continue
 
         daily_sales = temp_sales
         print(f"Processed {processed_order_items} order items from {order_count_response} orders in response for '{config_key}'. Found {len(daily_sales)} days with sales. (Pagination may apply)")
