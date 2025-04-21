@@ -84,6 +84,10 @@ def get_cafe24_access_token(config_key, config):
         "Content-Type": "application/x-www-form-urlencoded"
     }
 
+    # --- ⬇️ [필수 디버깅 로그] 사용 중인 Refresh Token 값 확인 ⬇️ ---
+    print(f"DEBUG: Using Refresh Token starting with: {refresh_token[:5]}") # 보안상 앞 5자리만 출력
+    # --- ⬆️ [필수 디버깅 로그] ---
+
     try:
         response = requests.post(token_url, data=token_data, headers=token_headers, timeout=15) # Add timeout
         response_data = response.json() # Get JSON regardless of status code initially
