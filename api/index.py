@@ -157,111 +157,99 @@ def generate_report():
         return jsonify({"error": error_message, "details": str(e)}), 500
 
 
-# --- ★★★ 크리에이티브 관련 함수들 (사용자 제공 버전 기반 + target_url 개선 + fields 수정) ★★★ ---
-
 def get_creative_details(ad_id, ver, token):
-    """
-    광고 ID -> 크리에이티브 ID -> 상세 정보 조회.
-    이전 버전 로직 기반 + target_url 개선 + 오류 회피 위한 fields 수정.
-    """
     creative_details = {'content_type': '알 수 없음', 'display_url': '', 'target_url': ''}
     try:
-        # 1. Creative ID 얻기
-        creative_req_url = f"https://graph.facebook.com/{ver}/{ad_id}"
-        creative_params = {'fields': 'creative{id}', 'access_token': token}
-        creative_response = requests.get(url=creative_req_url, params=creative_params, timeout=10)
-        creative_response.raise_for_status()
-        creative_id = creative_response.json().get('creative', {}).get('id')
+        # 1. Get Creative ID
+        creative_resp = requests.get(
+            f"https://graph.facebook.com/{ver}/{ad_id}",
+            params={'fields': 'creative{id}', 'access_token': token},
+            timeout=10
+        )
+        creative_resp.raise_for_status()
+        creative_id = creative_resp.json().get('creative', {}).get('id')
+        if not creative_id:
+            return creative_details
 
-        if creative_id:
-            # 2. Creative 상세 정보 얻기 (수정된 fields 사용)
-            details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-            # 필드 요청 (Old Instagram ID 오류 회피 시도 + 필요한 링크 필드 포함)
-            fields = 'object_type,image_url,thumbnail_url,video_id,object_story_spec{link_data{link,picture,image_url,video_id}},instagram_permalink_url,asset_feed_spec{videos{video_id,thumbnail_url},images{url},link_urls{website_url}}'
-            details_params = {'fields': fields, 'access_token': token}
-            details_response = requests.get(url=details_req_url, params=details_params, timeout=15)
-            details_response.raise_for_status()
-            details_data = details_response.json()
+        # 2. Get Creative Details
+        details_resp = requests.get(
+            f"https://graph.facebook.com/{ver}/{creative_id}",
+            params={
+                'fields': 'object_type,video_id,image_url,thumbnail_url,instagram_permalink_url,object_story_spec{link_data{link,picture,image_url,video_id}},asset_feed_spec{videos{video_id,thumbnail_url},images{url},link_urls{website_url}}',
+                'access_token': token
+            },
+            timeout=15
+        )
+        details_resp.raise_for_status()
+        data = details_resp.json()
 
-            # --- 디버깅 로그 (필요 시 주석 해제) ---
-            # print(f"--- Creative RAW for ad_id: {ad_id} ---"); print(json.dumps(details_data, indent=2, ensure_ascii=False)); print("--- END RAW ---")
-            # ---
+        object_type = data.get('object_type')
+        video_id = data.get('video_id')
+        image_url = data.get('image_url')
+        thumbnail_url = data.get('thumbnail_url')
+        instagram_permalink = data.get('instagram_permalink_url')
 
-            # 데이터 추출
-            object_type = details_data.get('object_type')
-            video_id = details_data.get('video_id')
-            image_url = details_data.get('image_url')
-            thumbnail_url = details_data.get('thumbnail_url')
-            instagram_permalink_url = details_data.get('instagram_permalink_url')
-            story_spec = details_data.get('object_story_spec', {})
-            asset_feed_spec = details_data.get('asset_feed_spec', {})
+        # Feed spec
+        asset_feed = data.get('asset_feed_spec', {})
+        videos = asset_feed.get('videos', [])
+        images = asset_feed.get('images', [])
+        link_urls = asset_feed.get('link_urls', [])
 
-            # AFS 데이터
-            videos_from_feed = asset_feed_spec.get('videos', []) if asset_feed_spec else []
-            feed_video_id = videos_from_feed[0].get('video_id') if videos_from_feed else None
-            feed_thumbnail_url = videos_from_feed[0].get('thumbnail_url') if videos_from_feed else None
-            images_from_feed = asset_feed_spec.get('images', []) if asset_feed_spec else []
-            feed_image_url = images_from_feed[0].get('url') if images_from_feed else None
-            link_urls_from_feed = asset_feed_spec.get('link_urls', []) if asset_feed_spec else []
-            feed_website_url = link_urls_from_feed[0].get('website_url') if link_urls_from_feed else None # ★ AFS 랜딩 URL
+        feed_video_id = videos[0].get('video_id') if videos else None
+        feed_thumb_url = videos[0].get('thumbnail_url') if videos else None
+        feed_img_url = images[0].get('url') if images else None
+        feed_url = link_urls[0].get('website_url') if link_urls else None
 
-            # OSS 데이터
-            link_data = story_spec.get('link_data', {}) if story_spec else {}
-            oss_image_url = link_data.get('picture') or link_data.get('image_url') # picture 우선
-            oss_link = link_data.get('link') # ★ OSS 랜딩 URL
-            oss_video_id = link_data.get('video_id')
+        # OSS
+        oss = data.get('object_story_spec', {}).get('link_data', {})
+        oss_image_url = oss.get('picture') or oss.get('image_url')
+        oss_link = oss.get('link')
+        oss_video_id = oss.get('video_id')
 
-            # 최종 값 결정
-            actual_video_id = video_id or feed_video_id or oss_video_id
-            # 표시 URL: 썸네일 > 피드 이미지 > 이미지 > OSS 이미지 순서로 찾기
-            display_image_url = thumbnail_url or feed_thumbnail_url or image_url or feed_image_url or oss_image_url or ""
-            # ★★ 대상 URL(target_url) 결정 로직: 실제 링크 우선! ★★
-            best_target_url = feed_website_url or oss_link or instagram_permalink_url
+        # 유형 판단
+        actual_video_id = video_id or feed_video_id or oss_video_id
+        display_image = thumbnail_url or feed_thumb_url or image_url or feed_img_url or oss_image_url
 
-            # 콘텐츠 유형 결정
-            content_type = '알 수 없음' # 기본값
-            if object_type == 'VIDEO' or actual_video_id:
-                content_type = '동영상'
-            elif object_type == 'PHOTO':
-                 content_type = '사진'
-            elif object_type == 'CAROUSEL' or (asset_feed_spec and (images_from_feed or videos_from_feed)):
-                 content_type = '캐러셀'
-            elif instagram_permalink_url:
-                 content_type = '인스타그램'
-            elif object_type == 'SHARE':
-                 if actual_video_id: content_type = '동영상'
-                 elif display_image_url: content_type = '사진' # 이미지 URL 있으면 사진으로 간주
-                 else: content_type = '공유 게시물'
-            elif display_image_url: # 유형 판별 안됐지만 이미지가 있으면 사진으로
-                content_type = '사진'
+        # 콘텐츠 유형 지정
+        if object_type == 'VIDEO' or actual_video_id:
+            content_type = '동영상'
+        elif object_type == 'PHOTO':
+            content_type = '사진'
+        elif object_type == 'CAROUSEL':
+            content_type = '캐러셀'
+        elif instagram_permalink:
+            content_type = '인스타그램'
+        else:
+            content_type = '알 수 없음'
 
-            # 최종 값 할당
-            creative_details['content_type'] = content_type
-            creative_details['display_url'] = display_image_url
+        # 링크 우선순위 재정렬
+        final_url = (
+            feed_url or
+            oss_link or
+            instagram_permalink or
+            (f"https://www.facebook.com/watch/?v={actual_video_id}" if actual_video_id else None)
+        )
 
-            # Target URL 최종 결정 (비디오 링크는 fallback)
-            final_target_url = best_target_url
-            if content_type == '동영상' and actual_video_id and not final_target_url:
-                video_source_url = get_video_source_url(actual_video_id, ver, token)
-                final_target_url = video_source_url if video_source_url else f"https://www.facebook.com/watch/?v={actual_video_id}"
+        # 보완: 동영상인데도 링크 없으면 video source 가져오기
+        if content_type == '동영상' and not final_url and actual_video_id:
+            video_resp = requests.get(
+                f"https://graph.facebook.com/{ver}/{actual_video_id}",
+                params={'fields': 'source', 'access_token': token},
+                timeout=10
+            )
+            if video_resp.ok:
+                final_url = video_resp.json().get('source')
 
-            # 유효한 URL만 할당
-            if isinstance(final_target_url, str) and final_target_url.startswith('http'):
-                creative_details['target_url'] = final_target_url
-            elif isinstance(display_image_url, str) and display_image_url.startswith('http') and content_type != '동영상':
-                 # 동영상 아니면서 다른 링크 없고 표시 URL이 링크 형태면 표시 URL 사용
-                 creative_details['target_url'] = display_image_url
-            else:
-                 creative_details['target_url'] = '' # 나머지는 빈 값
+        creative_details.update({
+            'content_type': content_type,
+            'display_url': display_image or '',
+            'target_url': final_url or ''
+        })
 
-    # except 블록 (최신 유지)
-    except requests.exceptions.Timeout: print(f"Timeout fetching creative details for ad_id {ad_id}.")
-    except requests.exceptions.RequestException as e:
-        response_text = e.response.text[:500] if hasattr(e, 'response') and e.response is not None else 'N/A'
-        print(f"Error fetching creative details for ad_id {ad_id}: {e}. Response: {response_text}...")
-    except Exception as e: print(f"Error processing creative details for ad_id {ad_id}: {e}")
+    except Exception as e:
+        print(f"[ERROR] get_creative_details({ad_id}) failed: {e}")
+
     return creative_details
-
 def get_video_source_url(video_id, ver, token):
     # 사용자가 제공한 이전 버전 로직 유지
     try:
