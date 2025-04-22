@@ -417,44 +417,95 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # ... (HTML 테이블 생성 - target_url 링크 적용 확인) ...
     def format_currency(amount): return f"{int(amount):,} ₩" if pd.notna(amount) and not isinstance(amount, str) else ("0 ₩" if pd.notna(amount) else "0 ₩")
     def format_number(num): return f"{int(num):,}" if pd.notna(num) and not isinstance(num, str) else ("0" if pd.notna(num) else "0")
+
     display_columns = ['광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', '구매 수', '구매당 비용', 'Cafe24 방문자 수', 'Cafe24 매출', '광고 성과', '콘텐츠 유형', '광고 콘텐츠']
-    html_table = """<style>/* ... CSS ... */</style><table><thead><tr>""" # CSS 축약
+    # CSS 스타일 정의 (필요시 상세 스타일 복원 또는 수정)
+    html_table = """
+    <style>
+        table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: right; vertical-align: middle; }
+        th { background-color: #f2f2f2; text-align: center; white-space: nowrap; }
+        td.text-left { text-align: left; }
+        td.text-center { text-align: center; }
+        tr.total-row { font-weight: bold; background-color: #e9e9e9; }
+        .ad-content-thumbnail { max-width: 60px; max-height: 60px; vertical-align: middle; }
+        .ad-content-cell { width: 80px; text-align: center; }
+        .winning-content { background-color: #d4edda; color: #155724; font-weight: bold; }
+        .medium-performance { background-color: #fff3cd; color: #856404; }
+        .third-performance { background-color: #e2e3e5; color: #383d41; }
+        .needs-improvement { background-color: #f8d7da; color: #721c24; font-weight: bold; }
+        a {text-decoration: none; color: inherit;}
+    </style>
+    <table><thead><tr>
+    """
+    # 테이블 헤더 생성
     for col_name in display_columns: html_table += f"<th>{col_name}</th>"
     html_table += "</tr></thead><tbody>"
+
+    # 테이블 바디 생성 (데이터 행 반복)
     for index, row in df_sorted.iterrows():
         is_total_row = row.get('광고명') == '합계'; row_class = 'total-row' if is_total_row else ''
-        html_table += f'<tr class="{row_class}">'
+        html_table += f'<tr class="{row_class}">' # 행 시작
+
+        # 각 컬럼에 대한 셀(td) 생성
         for col in display_columns:
-            value = None; td_class = []; td_align = 'right'
-            # 컬럼별 처리 로직 ...
-            if col in ['광고명', '캠페인명', '광고세트명']: value = row.get(col, ''); td_align = 'left'; td_class.append('text-left')
-            elif col in ['FB 광고비용', 'CPC', '구매당 비용', 'Cafe24 매출']: value = format_currency(row.get(col))
-            elif col in ['노출', 'Click', '구매 수', 'Cafe24 방문자 수']: value = format_number(row.get(col))
-            elif col == 'CTR': value = row.get(col, '0.00%')
+            value = None; td_class = []; td_align = 'right' # 셀 기본값
+
+            # 컬럼별 값 및 스타일링 처리
+            if col in ['광고명', '캠페인명', '광고세트명']:
+                value = row.get(col, ''); td_align = 'left'; td_class.append('text-left')
+            elif col in ['FB 광고비용', 'CPC', '구매당 비용', 'Cafe24 매출']:
+                value = format_currency(row.get(col))
+            elif col in ['노출', 'Click', '구매 수', 'Cafe24 방문자 수']:
+                value = format_number(row.get(col))
+            elif col == 'CTR':
+                value = row.get(col, '0.00%')
             elif col == '광고 성과':
-                performance_text = row.get(col, ''); performance_class = '';
-                if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'; elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'; elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'; elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
-                value = performance_text;
-                if performance_class: td_class.append(performance_class)
-                td_align = 'center'; td_class.append('text-center')
-            elif col == '콘텐츠 유형': value = row.get(col, '-') if not is_total_row else ''; td_align = 'center'; td_class.append('text-center')
-            elif col == '광고 콘텐츠': # ★ target_url 링크 적용 확인 ★
-                display_url = row.get('display_url', ''); target_url = row.get('target_url', '')
+                performance_text = row.get(col, '') # 광고 성과 텍스트
+                performance_class = '' # CSS 클래스 초기화
+
+                # --- ⬇️ 여기가 수정된 부분 (여러 줄 if/elif) ⬇️ ---
+                if performance_text == '위닝 콘텐츠':
+                    performance_class = 'winning-content'
+                elif performance_text == '고성과 콘텐츠':
+                    performance_class = 'medium-performance'
+                elif performance_text == '성과 콘텐츠':
+                    performance_class = 'third-performance'
+                elif performance_text == '개선 필요!':
+                    performance_class = 'needs-improvement'
+                # --- ⬆️ 수정 완료 ⬆️ ---
+
+                value = performance_text # 셀 내용은 텍스트
+                if performance_class: td_class.append(performance_class) # CSS 클래스 추가
+                td_align = 'center'; td_class.append('text-center') # 가운데 정렬
+            elif col == '콘텐츠 유형':
+                value = row.get(col, '-') if not is_total_row else ''; td_align = 'center'; td_class.append('text-center')
+            elif col == '광고 콘텐츠':
+                display_url = row.get('display_url', ''); target_url = row.get('target_url', '') # 이미 URL 가져옴
                 content_tag = "";
                 if not is_total_row and display_url:
                     img_tag = f'<img src="{display_url}" class="ad-content-thumbnail" alt="콘텐츠 썸네일">'
-                    # target_url이 유효한 http(s) 링크일 때만 <a> 태그 적용
+                    # target_url이 유효한 링크일 때만 <a> 태그 추가
                     if isinstance(target_url, str) and target_url.startswith('http'):
                         content_tag = f'<a href="{target_url}" target="_blank" title="콘텐츠 보기">{img_tag}</a>'
-                    else: content_tag = img_tag # 링크 없거나 잘못되면 이미지만 표시
-                elif not is_total_row: content_tag = "-"
+                    else: content_tag = img_tag # 링크 없으면 이미지만
+                elif not is_total_row: content_tag = "-" # 합계행 아니면 '-'
                 value = content_tag; td_class.append("ad-content-cell"); td_align = 'center'
-            else: value = row.get(col, '')
-            if not is_total_row and col in ['Cafe24 방문자 수', 'Cafe24 매출']: value = '-' # 합계행 아니면 Cafe24 값 '-'
-            td_style = f'text-align: {td_align};'; td_class_attr = f' class="{" ".join(td_class)}"' if td_class else ''
-            html_table += f'<td{td_class_attr} style="{td_style}">{value}</td>'
-        html_table += "</tr>\n"
-    html_table += "</tbody></table>"
+            else:
+                value = row.get(col, '') # 정의되지 않은 다른 컬럼
+
+            # 합계 행의 Cafe24 값은 '-' 처리 안 함 (숫자 그대로 표시)
+            # 합계 행이 아닌 경우에만 Cafe24 관련 컬럼 값을 '-' 로 변경
+            if not is_total_row and col in ['Cafe24 방문자 수', 'Cafe24 매출']:
+                value = '-'
+
+            # 최종 td 태그 생성
+            td_style = f'text-align: {td_align};'
+            td_class_attr = f' class="{" ".join(td_class)}"' if td_class else ''
+            html_table += f'<td{td_class_attr} style="{td_style}">{value}</td>' # 셀 추가
+
+        html_table += "</tr>\n" # 행 종료
+    html_table += "</tbody></table>" # 테이블 종료
 
     # --- JSON 데이터 준비 (최신 버전 로직 유지) ---
     # ... (JSON 클리닝 및 반환 로직은 이전과 동일) ...
