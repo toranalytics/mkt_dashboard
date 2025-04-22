@@ -214,15 +214,41 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         df_valid_cost['구매당 비용_num'] = pd.to_numeric(df_valid_cost['구매당 비용'])
         df_rank_candidates = df_valid_cost[df_valid_cost['구매당 비용_num'] < 100000].sort_values(by='구매당 비용_num', ascending=True)
         top_ad_ids = df_rank_candidates.head(3)['ad_id'].tolist()
-    def categorize_performance(row): # 최종 수정된 함수 사용
-        if row['광고명'] == '합계': return ''
-        ad_id_current = row.get('ad_id'); cost = pd.to_numeric(row.get('구매당 비용', float('inf')), errors='coerce')
-        if pd.isna(cost) or cost == 0: return '';
-        if cost >= 100000: return '개선 필요!'
+    def categorize_performance(row):
+        # 합계 행은 제외
+        if row['광고명'] == '합계':
+            return ''
+
+        ad_id_current = row.get('ad_id')
+        cost = pd.to_numeric(row.get('구매당 비용', float('inf')), errors='coerce')
+
+        # 구매당 비용 계산 불가 시 제외
+        if pd.isna(cost) or cost == 0:
+            return ''
+
+        # 기준 금액 이상이면 '개선 필요!'
+        if cost >= 100000:
+            return '개선 필요!'
+
+        # 상위 ad_id 리스트(top_ad_ids)에 포함되는지 확인
+        # ★★★ 이 if 문의 들여쓰기가 중요합니다! ★★★
         if ad_id_current in top_ad_ids:
-            try: rank = top_ad_ids.index(ad_id_current)
-            except ValueError: return ''
-            if rank == 0: return '위닝 콘텐츠'; elif rank == 1: return '고성과 콘텐츠'; elif rank == 2: return '성과 콘텐츠';
+            try:
+                # 순위(인덱스) 찾기
+                rank = top_ad_ids.index(ad_id_current)
+                # 순위에 따라 성과 분류 반환 (들여쓰기 확인!)
+                if rank == 0:
+                    return '위닝 콘텐츠'
+                elif rank == 1:
+                    return '고성과 콘텐츠'
+                elif rank == 2:
+                    return '성과 콘텐츠'
+                # else: rank 3 이상은 아래 최종 return '' 로 처리됨
+            except ValueError:
+                # 혹시 리스트에 없는 예외적인 경우
+                return ''
+
+        # 위 if문에 해당하지 않거나 rank 3 이상인 경우 빈칸 반환
         return ''
     if 'ad_id' in df_sorted.columns: df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1)
     else: df_sorted['광고 성과'] = ''
