@@ -411,7 +411,12 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         if ad_id_current in top_ad_ids:
             try: rank = top_ad_ids.index(ad_id_current)
             except ValueError: return ''
-            if rank == 0: return '위닝 콘텐츠'; elif rank == 1: return '고성과 콘텐츠'; elif rank == 2: return '성과 콘텐츠';
+            if rank == 0:
+                    return '위닝 콘텐츠'
+                elif rank == 1:
+                    return '고성과 콘텐츠'
+                elif rank == 2:
+                    return '성과 콘텐츠'
         return ''
     if 'ad_id' in df_sorted.columns: df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1)
     else: df_sorted['광고 성과'] = ''
