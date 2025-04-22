@@ -187,7 +187,7 @@ def get_creative_details(ad_id, ver, token):
         video_id = data.get('video_id')
         image_url = data.get('image_url')
         thumbnail_url = data.get('thumbnail_url')
-        instagram_permalink = data.get('instagram_permalink_url')
+        instagram_permalink_url = data.get('instagram_permalink_url')
 
         # Feed spec
         asset_feed = data.get('asset_feed_spec', {})
@@ -206,50 +206,53 @@ def get_creative_details(ad_id, ver, token):
         oss_link = oss.get('link')
         oss_video_id = oss.get('video_id')
 
-        # 유형 판단
+        # 최종 값들 정리
         actual_video_id = video_id or feed_video_id or oss_video_id
         display_image = thumbnail_url or feed_thumb_url or image_url or feed_img_url or oss_image_url
 
-        # 콘텐츠 유형 지정
-        if object_type == 'VIDEO' or actual_video_id:
-            content_type = '동영상'
-        elif object_type == 'PHOTO':
-            content_type = '사진'
-        elif object_type == 'CAROUSEL':
-            content_type = '캐러셀'
-        elif instagram_permalink:
-            content_type = '인스타그램'
+        # 콘텐츠 유형 판단
+        if actual_video_id:
+            if "t15.13418-10" in (thumbnail_url or ""):
+                content_type = "숏폼"
+            else:
+                content_type = "동영상"
+        elif display_image and not actual_video_id:
+            if ".mp4" in display_image or "video" in display_image:
+                content_type = "동영상"
+            else:
+                content_type = "이미지"
+        elif instagram_permalink_url:
+            content_type = "인스타그램"
+        elif object_type == "SHARE":
+            content_type = "공유 게시물"
+        elif image_url or thumbnail_url:
+            content_type = "이미지"
         else:
-            content_type = '알 수 없음'
+            content_type = "기타"  # 알 수 없음 제거
 
-        # 링크 우선순위 재정렬
-        final_url = (
+        # 링크 결정
+        target_url = (
             feed_url or
             oss_link or
-            instagram_permalink or
+            instagram_permalink_url or
             (f"https://www.facebook.com/watch/?v={actual_video_id}" if actual_video_id else None)
         )
 
-        # 보완: 동영상인데도 링크 없으면 video source 가져오기
-        if content_type == '동영상' and not final_url and actual_video_id:
-            video_resp = requests.get(
-                f"https://graph.facebook.com/{ver}/{actual_video_id}",
-                params={'fields': 'source', 'access_token': token},
-                timeout=10
-            )
-            if video_resp.ok:
-                final_url = video_resp.json().get('source')
+        # 숏폼 fallback
+        if content_type == "숏폼" and not target_url and actual_video_id:
+            target_url = f"https://www.facebook.com/watch/?v={actual_video_id}"
 
         creative_details.update({
             'content_type': content_type,
             'display_url': display_image or '',
-            'target_url': final_url or ''
+            'target_url': target_url or ''
         })
 
     except Exception as e:
         print(f"[ERROR] get_creative_details({ad_id}) failed: {e}")
 
     return creative_details
+
 def get_video_source_url(video_id, ver, token):
     # 사용자가 제공한 이전 버전 로직 유지
     try:
