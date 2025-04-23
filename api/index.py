@@ -317,18 +317,20 @@ def generate_report():
         return jsonify({"error": error_message, "details": str(e)}), 500
 
 
-# ↓↓↓↓↓ 아래 함수 전체를 복사해서 기존 get_creative_details 함수를 덮어쓰세요 ↓↓↓↓↓
 def get_creative_details(ad_id, ver, token):
-    """광고 ID를 사용하여 크리에이티브 상세 정보를 가져옵니다. (콘텐츠 유형: 동영상/사진 단순화)"""
+    """광고 ID를 사용하여 크리에이티브 상세 정보를 가져옵니다. (콘텐츠 유형 단순화, 디버깅 강화)"""
     # 기본 반환 구조
     creative_details = {
-        'content_type': '알 수 없음', # 최종 유형: 동영상 or 사진
-        'display_url': '',        # HTML 테이블 표시용 썸네일
-        'target_url': '',         # 랜딩 페이지 URL (참고용)
-        'creative_asset_url': ''  # ★★★ 썸네일 클릭 시 열릴 광고 소재(동영상/사진) URL ★★★
+        'content_type': '알 수 없음',
+        'display_url': '',
+        'target_url': '',
+        'creative_asset_url': ''
     }
+    # ★★★ 디버깅할 특정 Creative ID 설정 (필요시 변경) ★★★
+    DEBUG_CREATIVE_ID = "1348468862968678" # '러닝 대표님 이미지'의 Creative ID (이전 제공 기준)
+
     try:
-        # 1. Creative ID 얻기 (기존과 동일)
+        # 1. Creative ID 얻기
         creative_req_url = f"https://graph.facebook.com/{ver}/{ad_id}"
         creative_params = {'fields': 'creative{id}', 'access_token': token}
         creative_response = requests.get(url=creative_req_url, params=creative_params, timeout=10)
@@ -336,14 +338,17 @@ def get_creative_details(ad_id, ver, token):
         creative_data = creative_response.json()
         creative_id = creative_data.get('creative', {}).get('id')
 
+        # ★★★ 특정 ID 디버깅 로그 시작 ★★★
+        is_debug_target = creative_id == DEBUG_CREATIVE_ID
+        if is_debug_target:
+             print(f"\n--- DEBUG START Creative ID: {creative_id} ---")
+             print(f"Ad ID: {ad_id}")
+
         if creative_id:
-            # 2. Creative 상세 정보 얻기 (필수 필드 요청 - 기존과 동일)
+            # 2. Creative 상세 정보 얻기
             details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
             fields = (
-                'object_type,' # 참고용으로 유지
-                'image_url,'
-                'thumbnail_url,'
-                'video_id,'
+                'object_type,' 'image_url,' 'thumbnail_url,' 'video_id,'
                 'object_story_spec{link_data{link,picture,image_url,video_id}},'
                 'asset_feed_spec{videos{video_id,thumbnail_url},images{url},link_urls{website_url}},'
                 'instagram_permalink_url'
@@ -353,8 +358,9 @@ def get_creative_details(ad_id, ver, token):
             details_response.raise_for_status()
             details_data = details_response.json()
 
-            # 3. 상세 데이터 추출 (기존과 동일)
-            # object_type = details_data.get('object_type') # 이제 유형 판별에 직접 사용 안 함
+            if is_debug_target: print(f"API Response Data: {json.dumps(details_data, indent=2)}") # API 응답 전체 로깅
+
+            # 3. 상세 데이터 추출
             image_url = details_data.get('image_url')
             thumbnail_url = details_data.get('thumbnail_url')
             video_id = details_data.get('video_id')
@@ -374,53 +380,73 @@ def get_creative_details(ad_id, ver, token):
             feed_website_url = link_urls_from_feed[0].get('website_url') if link_urls_from_feed else None
             instagram_permalink_url = details_data.get('instagram_permalink_url')
 
-            # --- 4. 최종 값 결정 (단순화된 로직) ---
+            if is_debug_target: # 추출된 주요 URL 로깅
+                 print(f"Extracted image_url: {image_url}")
+                 print(f"Extracted thumbnail_url: {thumbnail_url}")
+                 print(f"Extracted video_id: {video_id}")
+                 print(f"Extracted oss_video_id: {oss_video_id}")
+                 print(f"Extracted feed_video_id: {feed_video_id}")
+                 print(f"Extracted feed_image_url: {feed_image_url}")
+                 print(f"Extracted feed_thumbnail_url: {feed_thumbnail_url}")
 
-            # 4.1 실제 비디오 ID 결정 (기존과 동일)
+            # --- 4. 최종 값 결정 ---
+
+            # 4.1 실제 비디오 ID 결정
             actual_video_id = video_id or feed_video_id or oss_video_id
+            if is_debug_target: print(f"Determined actual_video_id: {actual_video_id}")
 
             # 4.2 사용 가능한 최상위 이미지 URL 결정 (creative_asset_url 용)
             best_image_url = image_url or feed_image_url or oss_image_url or oss_picture_url or thumbnail_url or feed_thumbnail_url or ""
+            if is_debug_target: print(f"Determined best_image_url: {best_image_url}")
 
-            # 4.3 표시될 썸네일 URL 결정 (display_url 용 - 기존과 동일)
-            display_image_url = feed_thumbnail_url or thumbnail_url or oss_picture_url or feed_image_url or image_url or oss_image_url or ""
+            # ★★★ 4.3 표시될 썸네일 URL 결정 (display_url 용 - 우선순위 변경) ★★★
+            # 큰 이미지를 썸네일보다 우선하여 작은 썸네일 문제 완화 시도
+            display_image_url = image_url or feed_image_url or oss_image_url or oss_picture_url or feed_thumbnail_url or thumbnail_url or ""
             creative_details['display_url'] = display_image_url if isinstance(display_image_url, str) and display_image_url.startswith('http') else ''
+            if is_debug_target: print(f"Determined display_url: {creative_details['display_url']}")
 
-            # ★★★ 4.4 콘텐츠 유형 단순화 (동영상 or 사진) ★★★
-            content_type = '알 수 없음' # 기본값
+            # 4.4 콘텐츠 유형 단순화 (동영상 or 사진)
+            content_type = '알 수 없음'
             if actual_video_id:
-                content_type = '동영상' # 비디오 ID 있으면 무조건 동영상
-            elif best_image_url: # 비디오 ID 없고 이미지 URL 하나라도 있으면 무조건 사진
+                content_type = '동영상'
+            elif best_image_url: # 이미지 URL (썸네일 포함) 하나라도 있으면 사진
                 content_type = '사진'
-            # 그 외 복잡한 유형 (캐러셀, 인스타 등)은 고려 안 함
             creative_details['content_type'] = content_type
+            if is_debug_target: print(f"Determined content_type: {content_type}")
 
-            # ★★★ 4.5 광고 소재 URL (creative_asset_url) 설정 ★★★
+            # 4.5 광고 소재 URL (creative_asset_url) 설정
             creative_asset_url = ''
             if content_type == '동영상' and actual_video_id:
-                # 동영상이면 비디오 링크 가져오기
                 video_source_url = get_video_source_url(actual_video_id, ver, token)
                 creative_asset_url = video_source_url if video_source_url else f"https://www.facebook.com/watch/?v={actual_video_id}"
             elif content_type == '사진':
-                # 사진이면 위에서 찾은 최상위 이미지 URL 사용
-                creative_asset_url = best_image_url
+                creative_asset_url = best_image_url # 사진이면 best_image_url 사용
 
-            # 유효한 URL만 최종 할당
             if isinstance(creative_asset_url, str) and creative_asset_url.startswith('http'):
                 creative_details['creative_asset_url'] = creative_asset_url
-            else:
-                creative_details['creative_asset_url'] = '' # 없으면 빈 값
+            else: creative_details['creative_asset_url'] = ''
+            if is_debug_target: print(f"Determined creative_asset_url: {creative_details['creative_asset_url']}")
 
-            # 4.6 랜딩 페이지 URL (target_url) 설정 (참고용 - 기존과 동일)
+            # 4.6 랜딩 페이지 URL (target_url) 설정
             best_target_url = feed_website_url or oss_link or instagram_permalink_url
             creative_details['target_url'] = best_target_url if isinstance(best_target_url, str) and best_target_url.startswith('http') else ''
+            if is_debug_target: print(f"Determined target_url: {creative_details['target_url']}")
+
+        # ★★★ 특정 ID 디버깅 로그 종료 ★★★
+        if is_debug_target:
+             print(f"Final creative_details: {creative_details}")
+             print(f"--- DEBUG END Creative ID: {creative_id} ---\n")
 
     except requests.exceptions.RequestException as e:
         response_text = e.response.text[:500] if hasattr(e, 'response') and e.response is not None else 'N/A'
         print(f"Warning: Network error fetching creative details for ad_id {ad_id}: {e}. Response: {response_text}...")
+        # ★★★ 디버깅 대상 ID에서 오류 발생 시 로깅 ★★★
+        if creative_id == DEBUG_CREATIVE_ID: print(f"--- DEBUG FAILED (Network Error) for Creative ID: {creative_id} ---")
     except Exception as e:
         print(f"Warning: Error processing creative details for ad_id {ad_id}: {e}")
         traceback.print_exc()
+        # ★★★ 디버깅 대상 ID에서 오류 발생 시 로깅 ★★★
+        if creative_id == DEBUG_CREATIVE_ID: print(f"--- DEBUG FAILED (Processing Error) for Creative ID: {creative_id} ---")
 
     return creative_details
 # ↑↑↑↑↑ 위 함수 전체를 복사해서 기존 get_creative_details 함수를 덮어쓰세요 ↑↑↑↑↑
