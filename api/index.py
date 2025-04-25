@@ -451,7 +451,14 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             elif col == 'CTR': value = row.get(col, '0.00%')
             elif col == '광고 성과':
                 performance_text = row.get(col, ''); performance_class = '';
-                if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'; elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'; elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'; elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
+                if performance_text == '위닝 콘텐츠':
+                    performance_class = 'winning-content'
+                elif performance_text == '고성과 콘텐츠':
+                    performance_class = 'medium-performance'
+                elif performance_text == '성과 콘텐츠':
+                    performance_class = 'third-performance'
+                elif performance_text == '개선 필요!':
+                    performance_class = 'needs-improvement'
                 value = performance_text;
                 if performance_class: td_class.append(performance_class)
                 td_align = 'center'; td_class.append('text-center')
