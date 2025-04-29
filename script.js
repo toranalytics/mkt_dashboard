@@ -128,7 +128,7 @@ function renderReport(data) {
   }
 }
 
-// 테이블 정렬 기능 + 아이콘
+// 테이블 정렬 기능 + 아이콘, 광고 성과 우선순위 정렬, 상단 컬럼 고정
 function enableTableSort() {
   const table = document.querySelector("#report-result table");
   if (!table) return;
@@ -141,9 +141,9 @@ function enableTableSort() {
   function sortTable(colIndex) {
     const tbody = table.tBodies[0];
     const rows = Array.from(tbody.rows);
-    // 합계, 평균 행은 항상 맨 위에 고정 (클래스명으로 구분)
-    const fixedRows = rows.filter(r => r.classList.contains('total-row') || r.classList.contains('avg-row'));
-    const dataRows = rows.filter(r => !r.classList.contains('total-row') && !r.classList.contains('avg-row'));
+    // 합계 행은 항상 맨 위에 고정 (클래스명으로 구분)
+    const fixedRows = rows.filter(r => r.classList.contains('total-row'));
+    const dataRows = rows.filter(r => !r.classList.contains('total-row'));
     if (currentSortCol === colIndex) currentSortAsc = !currentSortAsc;
     else { currentSortCol = colIndex; currentSortAsc = true; }
     dataRows.sort((a, b) => {
