@@ -421,9 +421,19 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'CTR', 'CPC', '구매 수', '구매당 비용', 'ad_id',
         '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
     ]
-    df['광고 성과'] = ''
-    df = df[[col for col in column_order if col in df.columns or col == '광고 성과']]
-
+    df = df[[col for col in column_order if col in df.columns]]
+    
+    # 합계 행도 동일하게 맞추기
+    # (합계 행 계산 시 CVR은 전체 구매수/전체 클릭수로 계산)
+    total_clicks = df['Click'].sum()
+    total_purchases = df['구매 수'].sum() if '구매 수' in df.columns else 0
+    total_cvr = f"{round((total_purchases / total_clicks * 100), 2)}%" if total_clicks > 0 else "0%"
+    
+    totals_row = pd.Series([
+        '합계', '', '', df['FB 광고비용'].sum(), df['노출'].sum(), total_clicks,
+        '', '', total_cvr
+    ], index=column_order)
+    
     df_with_total = pd.concat([pd.DataFrame([totals_row]), df], ignore_index=True)
 
     def custom_sort_key(row):
