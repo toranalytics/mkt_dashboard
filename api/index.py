@@ -148,16 +148,17 @@ def get_creative_details(ad_id, ver, token):
                 media_type = ig_data.get('media_type')
                 permalink = ig_data.get('permalink')
                 thumbnail_url = ig_data.get('thumbnail_url', media_url)
-
+            
                 if media_type == 'VIDEO':
                     creative_details['content_type'] = '동영상'
                 elif media_type == 'IMAGE':
                     creative_details['content_type'] = '사진'
                 else:
                     creative_details['content_type'] = media_type or '알 수 없음'
-
+            
                 creative_details['display_url'] = thumbnail_url or media_url or ""
-                creative_details['target_url'] = permalink or media_url or ""
+                # ★ target_url을 무조건 media_url로 설정
+                creative_details['target_url'] = media_url or ""
                 return creative_details
 
             # --- Facebook 광고 로직 (기존과 동일) ---
