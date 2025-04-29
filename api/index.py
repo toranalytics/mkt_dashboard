@@ -322,12 +322,12 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
-
+    
         # 광고비용(Spend)이 0이면 건너뜀
         spend = float(record.get('spend', 0) or 0)
         if spend == 0:
             continue
-
+    
         if ad_id not in ad_data:
             ad_data[ad_id] = {
                 'ad_id': ad_id,
@@ -339,16 +339,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 'link_clicks': 0,
                 'purchase_count': 0,
             }
-
+    
         ad_data[ad_id]['spend'] += spend
-
-        try: ad_data[ad_id]['spend'] += float(record.get('spend', 0))
-        except (ValueError, TypeError): pass
         try: ad_data[ad_id]['impressions'] += int(record.get('impressions', 0))
         except (ValueError, TypeError): pass
         try: ad_data[ad_id]['link_clicks'] += int(record.get('clicks', 0))
         except (ValueError, TypeError): pass
-
+    
         purchase_on_record = 0
         actions = record.get('actions')
         if actions and isinstance(actions, list):
@@ -417,8 +414,10 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'CTR', 'CPC', '구매 수', '구매당 비용', 'ad_id',
         '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
     ])
+    df['CVR_val'] = df.apply(lambda r: (r['구매 수'] / r['Click'] * 100) if r['Click'] > 0 else 0, axis=1)
+    df['CVR'] = df['CVR_val'].apply(lambda x: f"{round(x, 2)}%")
     column_order = [
-        '광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click',
+        '캠페인명', '광고세트명','광고명','FB 광고비용', '노출', 'Click',
         'CTR', 'CPC', '구매 수', '구매당 비용', 'ad_id',
         '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
     ]
