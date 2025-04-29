@@ -4,7 +4,6 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-import time
 
 import pandas as pd
 import requests
@@ -97,9 +96,7 @@ def generate_report():
 
         ver = "v19.0"
 
-        print(f"[{time.time()}] 1. 페이스북 데이터 수집 시작")
         result = fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token)
-        print(f"[{time.time()}] 7. 전체 보고서 반환 완료")
         return jsonify(result)
 
     except requests.exceptions.RequestException as req_err:
@@ -256,7 +253,6 @@ def get_video_source_url(video_id, ver, token):
         return None
 
 def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
-    print(f"[{time.time()}] 3. 광고별 크리에이티브 병렬 요청 시작")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(get_creative_details, ad_id, ver, token): ad_id for ad_id in ad_data.keys()}
         for future in as_completed(futures):
@@ -270,7 +266,6 @@ def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
                 ad_data[ad_id]['creative_details'] = creative_info
             else:
                 print(f"Warning: ad_id {ad_id} not found in ad_data during creative fetch completion.")
-    print(f"[{time.time()}] 4. 광고별 크리에이티브 병렬 요청 완료")
 
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token):
     all_records = []
@@ -287,7 +282,6 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     }
 
     page_count = 1
-    print(f"[{time.time()}] 2. 인사이트 페이징 데이터 수집 시작")
     while insights_url:
         current_url = insights_url if page_count > 1 else insights_url
         current_params = params if page_count == 1 else None
@@ -321,13 +315,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         print("처리할 데이터가 없습니다.")
         return {"html_table": "<p>선택한 기간 및 계정에 대한 데이터가 없습니다.</p>", "data": []}
 
-    print(f"[{time.time()}] 2-1. 광고비 0원 광고 제외하며 집계 시작")
     ad_data = {}
     for record in all_records:
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
 
+        # 광고비용(Spend)이 0이면 건너뜀
         spend = float(record.get('spend', 0) or 0)
         if spend == 0:
             continue
@@ -362,17 +356,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         ad_data[ad_id]['campaign_name'] = record.get('campaign_name') or ad_data[ad_id]['campaign_name']
         ad_data[ad_id]['adset_name'] = record.get('adset_name') or ad_data[ad_id]['adset_name']
 
-    print(f"[{time.time()}] 2-2. 광고비 0원 광고 제외 후 {len(ad_data)}건 집계 완료")
-    print(f"[{time.time()}] 3. 광고별 크리에이티브 병렬 요청 직전")
     fetch_creatives_parallel(ad_data, ver, token, max_workers=10)
-    print(f"[{time.time()}] 5. 광고별 크리에이티브 병렬 요청 후")
 
     result_list = list(ad_data.values())
     if not result_list:
         print("데이터 집계 후 처리할 레코드가 없습니다.")
         return {"html_table": "<p>데이터가 없습니다.</p>", "data": []}
 
-    print(f"[{time.time()}] 6. 데이터프레임 생성 및 지표 계산 시작")
     df = pd.DataFrame(result_list)
 
     df['creative_details'] = df['ad_id'].map(lambda ad_id: ad_data.get(ad_id, {}).get('creative_details', {}))
@@ -391,41 +381,44 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         else:
             df[col] = 0
 
+    # 각종 지표 계산
     df['CTR'] = df.apply(lambda r: f"{round((r['link_clicks'] / r['impressions'] * 100), 2)}%" if r['impressions'] > 0 else "0%", axis=1)
     df['CPC'] = df.apply(lambda r: round(r['spend'] / r['link_clicks']) if r['link_clicks'] > 0 else 0, axis=1).astype(int)
     df['CVR'] = df.apply(lambda r: f"{round((r['purchase_count'] / r['link_clicks'] * 100), 2)}%" if r['link_clicks'] > 0 else "0%", axis=1)
+    df['구매당 비용'] = df.apply(lambda r: round(r['spend'] / r['purchase_count']) if r['purchase_count'] > 0 else 0, axis=1).astype(int)
 
-    # 컬럼명 정리
     df = df.rename(columns={
         'ad_name': '광고명', 'campaign_name': '캠페인명', 'adset_name': '광고세트명',
         'spend': 'FB 광고비용', 'impressions': '노출', 'link_clicks': 'Click',
         'purchase_count': '구매 수'
     })
 
-    # 원하는 컬럼 순서 (캠페인명/세트명/소재명/광고비/노출/클릭/CTR/CPC/CVR)
+    # 요청하신 컬럼 순서
     column_order = [
-        '캠페인명', '광고세트명', '광고명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', 'CVR'
+        '광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click',
+        'CTR', 'CPC', 'CVR', '구매 수', '구매당 비용', '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
     ]
     df = df[[col for col in column_order if col in df.columns]]
 
-    # 합계 행 계산
+    # 합계 행
     total_row = {
-        '캠페인명': '합계',
+        '광고명': '합계',
+        '캠페인명': '',
         '광고세트명': '',
-        '광고명': '',
         'FB 광고비용': df['FB 광고비용'].sum(),
         '노출': df['노출'].sum(),
         'Click': df['Click'].sum(),
-        'CTR': '',  # 합계 CTR은 보통 의미 없음
+        'CTR': '',
         'CPC': '',
-        'CVR': f"{round((df['Click'].sum() and df['광고명'].count() and df['Click'].sum() > 0 and (df['광고명'].count() / df['Click'].sum()) * 100 or 0), 2)}%"
+        'CVR': f"{round((df['구매 수'].sum() / df['Click'].sum() * 100), 2)}%" if df['Click'].sum() > 0 else "0%",
+        '구매 수': df['구매 수'].sum(),
+        '구매당 비용': '',
+        '광고 성과': '',
+        '콘텐츠 유형': '',
+        'display_url': '',
+        'target_url': ''
     }
-    # CVR은 전체 구매수/전체 클릭수로 계산해야 함. 하지만 '구매 수' 컬럼이 column_order에 없으므로, 위와 같이 처리.
-
-    # 합계 행 추가
     df_with_total = pd.concat([pd.DataFrame([total_row]), df], ignore_index=True)
-
-    # 아래는 기존 광고 성과, 썸네일 등 추가 컬럼이 필요하면 뒤에 붙이면 됩니다.
 
     def format_currency(amount): return f"{int(amount):,} ₩" if pd.notna(amount) and isinstance(amount, (int, float)) and not (math.isnan(amount) or math.isinf(amount)) else "0 ₩"
     def format_number(num): return f"{int(num):,}" if pd.notna(num) and isinstance(num, (int, float)) and not (math.isnan(num) or math.isinf(num)) else "0"
@@ -439,43 +432,60 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; }
     tr:hover {background-color: #f5f5f5;}
     .total-row {background-color: #e6f2ff; font-weight: bold;}
+    .winning-content {color: #009900; font-weight: bold;}
+    .medium-performance {color: #E69900; font-weight: bold;}
+    .third-performance {color: #FF9900; font-weight: bold;}
+    .needs-improvement {color: #FF0000; font-weight: bold;}
     a {text-decoration: none; color: inherit;}
     img.ad-content-thumbnail {max-width:100px; max-height:100px; vertical-align: middle;}
     td.ad-content-cell { text-align: center; }
     </style>
     <table>
       <tr>
-        <th>캠페인명</th>
-        <th>광고세트명</th>
-        <th>광고명</th>
-        <th>FB 광고비용</th>
-        <th>노출</th>
-        <th>Click</th>
-        <th>CTR</th>
-        <th>CPC</th>
-        <th>CVR</th>
+        <th>광고명</th> <th>캠페인명</th> <th>광고세트명</th> <th>FB 광고비용</th>
+        <th>노출</th> <th>Click</th> <th>CTR</th> <th>CPC</th> <th>CVR</th>
+        <th>구매 수</th> <th>구매당 비용</th> <th>광고 성과</th> <th>콘텐츠 유형</th> <th>광고 콘텐츠</th>
       </tr>
     """
     iter_df = df_with_total
 
     for index, row in iter_df.iterrows():
-        row_class = 'total-row' if row['캠페인명'] == '합계' else ''
+        row_class = 'total-row' if row['광고명'] == '합계' else ''
+        performance_text = row.get('광고 성과', '')
+        performance_class = ''
+        if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'
+        elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'
+        elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'
+        elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
+
+        display_url = row.get('display_url', '')
+        target_url = row.get('target_url', '')
+        content_tag = ""
+        if display_url:
+            img_tag = f'<img src="{display_url}" class="ad-content-thumbnail" alt="광고 콘텐츠">'
+            content_tag = f'<a href="{target_url}" target="_blank">{img_tag}</a>' if isinstance(target_url, str) and target_url.startswith('http') else img_tag
+        elif row['광고명'] != '합계': content_tag = "-"
+
         html_table += f"""
         <tr class="{row_class}">
+          <td>{row.get('광고명','')}</td>
           <td>{row.get('캠페인명','')}</td>
           <td>{row.get('광고세트명','')}</td>
-          <td>{row.get('광고명','')}</td>
           <td>{format_currency(row.get('FB 광고비용',0))}</td>
           <td>{format_number(row.get('노출',0))}</td>
           <td>{format_number(row.get('Click',0))}</td>
           <td>{row.get('CTR','0%')}</td>
           <td>{format_currency(row.get('CPC',0))}</td>
           <td>{row.get('CVR','0%')}</td>
+          <td>{format_number(row.get('구매 수',0))}</td>
+          <td>{format_currency(row.get('구매당 비용',0))}</td>
+          <td class="{performance_class}">{performance_text}</td>
+          <td>{row.get('콘텐츠 유형','')}</td>
+          <td class="ad-content-cell">{content_tag}</td>
         </tr>
         """
     html_table += "</table>"
 
-    # 데이터 반환용 JSON
     df_for_json = df_with_total
 
     def clean_numeric(data):
@@ -494,7 +504,6 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     records = df_for_json.to_dict(orient='records')
     cleaned_records = clean_numeric(records)
 
-    print(f"[{time.time()}] 7. 보고서 생성 및 반환 직전")
     return {"html_table": html_table, "data": cleaned_records}
 
 # Flask 앱 실행 (로컬 테스트 시 주석 해제)
