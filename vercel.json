@@ -21,7 +21,7 @@
       "use": "@vercel/static"
     }
   ],
- "routes": [
+  "routes": [
     {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
