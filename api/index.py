@@ -425,8 +425,21 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
 
     # --- ★★★ HTML 테이블 생성 (creative_asset_url 링크 사용) ★★★ ---
     print("Generating HTML table...")
-    def format_currency(amount): try: return f"{int(amount):,} ₩" except: return "0 ₩"
-    def format_number(num): try: return f"{int(num):,}" except: return "0"
+    def format_currency(amount):
+        try:
+            # 숫자로 변환 가능한지 확인 후 포맷팅 (소수점 가능성 고려)
+            return f"{int(float(amount)):,} ₩"
+        except (ValueError, TypeError, OverflowError):
+            # 변환 실패 시 "0 ₩" 반환
+            return "0 ₩"
+
+    def format_number(num):
+        try:
+            # 숫자로 변환 가능한지 확인 후 포맷팅
+            return f"{int(float(num)):,}"
+        except (ValueError, TypeError, OverflowError):
+            # 변환 실패 시 "0" 반환
+            return "0"
     display_columns = ['광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', '구매 수', '구매당 비용', 'Cafe24 방문자 수', 'Cafe24 매출', '광고 성과', '콘텐츠 유형', '광고 콘텐츠']
     # CSS 스타일 정의 (이전과 동일)
     html_table = """<style> table {border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;} th, td {padding: 8px; border-bottom: 1px solid #ddd; text-align: right; white-space: nowrap; vertical-align: middle;} th {background-color: #f2f2f2; text-align: center; font-weight: bold;} td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; } td:nth-child(11), td:nth-child(12), td:nth-child(13), td:nth-child(14), td:nth-child(15) { text-align: center; } tr:hover {background-color: #f5f5f5;} .total-row {background-color: #e6f2ff; font-weight: bold;} .winning-content {color: #009900; font-weight: bold;} .medium-performance {color: #E69900; font-weight: bold;} .third-performance {color: #FF9900; font-weight: bold;} .needs-improvement {color: #FF0000; font-weight: bold;} a {text-decoration: none; color: inherit;} img.ad-content-thumbnail {max-width:100px; max-height:100px; vertical-align: middle; border: 1px solid #eee;} td.ad-content-cell { text-align: center; } </style><table><thead><tr>"""
