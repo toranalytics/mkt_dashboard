@@ -320,7 +320,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     ad_data = {}
     for record in all_records:
         ad_id = record.get('ad_id')
-        if not ad_id: continue
+        if not ad_id:
+            continue
+
+        # 광고비용(Spend)이 0이면 건너뜀
+        spend = float(record.get('spend', 0) or 0)
+        if spend == 0:
+            continue
 
         if ad_id not in ad_data:
             ad_data[ad_id] = {
@@ -333,6 +339,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 'link_clicks': 0,
                 'purchase_count': 0,
             }
+
+        ad_data[ad_id]['spend'] += spend
 
         try: ad_data[ad_id]['spend'] += float(record.get('spend', 0))
         except (ValueError, TypeError): pass
