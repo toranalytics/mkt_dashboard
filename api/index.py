@@ -157,7 +157,6 @@ def generate_report():
 
         # --- 2. Meta 데이터 가져오기 및 보고서 생성 ---
         print(f"Fetching Meta Ads data for '{selected_account_key}' (ID: {meta_account_id})...")
-        # ★★★ 수정된 fetch_and_format_facebook_ads_data 함수 사용 ★★★
         final_report_data = fetch_and_format_facebook_ads_data(
             start_date_str, end_date_str, meta_api_version, meta_account_id, meta_token,
             cafe24_totals
@@ -187,36 +186,24 @@ def get_video_source_url(video_id, ver, token):
 
 def get_creative_details(ad_id, ver, token):
     """광고 ID -> 크리에이티브 ID -> 상세 정보 조회. 유형 단순화, 소재 링크 우선."""
-    # 기본 반환 구조 + creative_asset_url 추가
-    creative_details = {
-        'content_type': '기타',        # 최종 유형: 동영상 or 사진 or 기타
-        'display_url': '',         # HTML 테이블 표시용 썸네일
-        'target_url': '',          # 랜딩 페이지 URL (참고용)
-        'creative_asset_url': '' # ★ 썸네일 클릭 시 열릴 광고 소재 URL ★
-    }
+    creative_details = {'content_type': '기타', 'display_url': '', 'target_url': '', 'creative_asset_url': ''}
     creative_id = None
     try:
-        # 1. Creative ID 얻기
         creative_req_url = f"https://graph.facebook.com/{ver}/{ad_id}"
         creative_params = {'fields': 'creative{id}', 'access_token': token}
-        creative_response = requests.get(url=creative_req_url, params=creative_params, timeout=10)
-        creative_response.raise_for_status()
-        creative_id = creative_response.json().get('creative', {}).get('id')
+        creative_resp = requests.get(url=creative_req_url, params=creative_params, timeout=10); creative_resp.raise_for_status()
+        creative_id = creative_resp.json().get('creative', {}).get('id')
 
         if creative_id:
-            # 2. Creative 상세 정보 얻기 (오류 회피 + 필요 필드)
             details_req_url = f"https://graph.facebook.com/{ver}/{creative_id}"
-            # video_id 포함, link 포함 필드 요청 (Instagram ID 오류 회피 시도)
             fields = ('object_type,image_url,thumbnail_url,video_id,'
                       'object_story_spec{link_data{link,picture,image_url,video_id}},'
                       'asset_feed_spec{videos{video_id,thumbnail_url},images{url},link_urls{website_url}},'
                       'instagram_permalink_url')
             details_params = {'fields': fields, 'access_token': token}
-            details_response = requests.get(url=details_req_url, params=details_params, timeout=15)
-            details_response.raise_for_status()
-            details_data = details_response.json()
+            details_resp = requests.get(url=details_req_url, params=details_params, timeout=15); details_resp.raise_for_status()
+            details_data = details_resp.json()
 
-            # 3. 데이터 추출
             object_type = details_data.get('object_type')
             video_id = details_data.get('video_id'); image_url = details_data.get('image_url'); thumbnail_url = details_data.get('thumbnail_url')
             instagram_permalink_url = details_data.get('instagram_permalink_url')
@@ -228,50 +215,42 @@ def get_creative_details(ad_id, ver, token):
             link_data = story_spec.get('link_data', {}) if story_spec else {}; oss_image_url = link_data.get('picture') or link_data.get('image_url')
             oss_link = link_data.get('link'); oss_video_id = link_data.get('video_id')
 
-            # 4. 최종 값 결정
             actual_video_id = video_id or feed_video_id or oss_video_id
-            # 표시 URL: 썸네일 우선
             display_url_options = [thumbnail_url, feed_thumbnail_url, oss_picture_url, image_url, feed_image_url, oss_image_url]
             display_image_url = next((url for url in display_url_options if isinstance(url, str) and url.startswith('http')), '')
-            # 랜딩 페이지 URL
             landing_page_url = feed_website_url or oss_link
-            # 광고 소재 클릭 시 사용할 URL 초기화
             creative_asset_url = None
 
-            # ★ 콘텐츠 유형 단순화 (동영상 / 사진 / 기타) ★
+            # 콘텐츠 유형 단순화
             content_type = "기타"
             if actual_video_id or object_type == 'VIDEO' or (asset_feed_spec and videos_from_feed):
                 content_type = "동영상"
-                # 동영상 Asset URL 설정 (Watch 링크 또는 Source URL)
                 if actual_video_id:
-                    creative_asset_url = f"https://www.facebook.com/watch/?v={actual_video_id}" # 기본 Watch URL
-                    video_source = get_video_source_url(actual_video_id, ver, token) # Source 시도
-                    if video_source: creative_asset_url = video_source # Source 있으면 우선 사용
-            elif display_image_url or object_type == 'PHOTO' or (asset_feed_spec and images_from_feed): # 이미지 URL 있으면 사진
+                    creative_asset_url = f"https://www.facebook.com/watch/?v={actual_video_id}"
+                    video_source = get_video_source_url(actual_video_id, ver, token)
+                    if video_source: creative_asset_url = video_source
+            elif display_image_url or object_type == 'PHOTO' or (asset_feed_spec and images_from_feed):
                  content_type = "사진"
-                 # 사진 Asset URL: 고화질 이미지 > 썸네일 순서
                  image_options = [image_url, feed_image_url, oss_image_url, oss_picture_url, thumbnail_url, feed_thumbnail_url]
                  creative_asset_url = next((url for url in image_options if isinstance(url, str) and url.startswith('http')), '')
-            elif instagram_permalink_url: # 인스타 링크 있으면 유형 '사진', 링크는 인스타
-                content_type = "사진" # 인스타그램도 일단 사진으로 통일
+            elif instagram_permalink_url:
+                content_type = "사진" # 인스타그램도 사진으로 통일
                 creative_asset_url = instagram_permalink_url
 
-            # 5. 최종 결과 할당
+            # 최종 할당
             creative_details['content_type'] = content_type
-            creative_details['display_url'] = display_image_url # 썸네일 우선 표시
-            creative_details['target_url'] = landing_page_url if isinstance(landing_page_url, str) and landing_page_url.startswith('http') else '' # 참고용 랜딩 페이지
-            creative_details['creative_asset_url'] = creative_asset_url if isinstance(creative_asset_url, str) and creative_asset_url.startswith('http') else '' # ★ 클릭 시 열릴 소재 링크
+            creative_details['display_url'] = display_image_url
+            creative_details['target_url'] = landing_page_url if isinstance(landing_page_url, str) and landing_page_url.startswith('http') else ''
+            creative_details['creative_asset_url'] = creative_asset_url if isinstance(creative_asset_url, str) and creative_asset_url.startswith('http') else ''
 
         else: print(f"Warning: Could not get Creative ID for Ad ID: {ad_id}")
 
-    # 오류 처리
     except requests.exceptions.RequestException as e: print(f"Warn: Creative fetch failed for ad_id {ad_id}: {getattr(e.response, 'text', e)[:500]}...")
     except Exception as e: print(f"Warn: Creative processing error for ad_id {ad_id}: {e}")
     return creative_details
 
-
 def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
-    # 이전 버전 유지 (병렬 처리)
+    # 이전 버전 유지
     print(f"Fetching creative details for {len(ad_data)} ads...")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         if not ad_data: print("No ad data for creatives."); return
@@ -286,8 +265,7 @@ def fetch_creatives_parallel(ad_data, ver, token, max_workers=10):
             if processed_count % 50 == 0 or processed_count == total_ads: print(f"Processed {processed_count}/{total_ads} creative details...")
     print("Finished fetching creative details.")
 
-
-# --- ★★★ fetch_and_format_facebook_ads_data 함수 (HTML 생성 부분 수정) ★★★ ---
+# --- ★★★ fetch_and_format_facebook_ads_data 함수 (SyntaxError 수정 + HTML 링크 수정) ★★★ ---
 def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token, cafe24_totals):
     # --- 데이터 가져오기 및 집계 (이전과 동일) ---
     all_records = []; metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions{action_type,value}'; insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
@@ -338,13 +316,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # --- DataFrame 후처리 (creative_asset_url 포함) ---
     default_creative_details = {'content_type': '기타', 'display_url': '', 'target_url': '', 'creative_asset_url': ''}
     df['creative_details_dict'] = df['ad_id'].map(lambda aid: ad_data.get(aid, {}).get('creative_details', default_creative_details))
-    df['콘텐츠 유형'] = df['creative_details_dict'].apply(lambda x: x.get('content_type', '기타')) # 단순화된 유형
+    df['콘텐츠 유형'] = df['creative_details_dict'].apply(lambda x: x.get('content_type', '기타'))
     df['display_url'] = df['creative_details_dict'].apply(lambda x: x.get('display_url', ''))
     df['target_url'] = df['creative_details_dict'].apply(lambda x: x.get('target_url', '')) # 랜딩 페이지
     df['creative_asset_url'] = df['creative_details_dict'].apply(lambda x: x.get('creative_asset_url', '')) # ★ 소재 링크
     df = df.drop(columns=['creative_details_dict'])
 
-    # --- 나머지 후처리, 정렬, 광고 성과 분류 (이전과 동일 + SyntaxError 수정) ---
+    # --- 나머지 후처리, 정렬, 광고 성과 분류 (SyntaxError 수정) ---
     numeric_cols = ['spend', 'impressions', 'link_clicks', 'purchase_count']
     for col in numeric_cols: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df['CTR'] = df.apply(lambda r: f"{(r['link_clicks'] / r['impressions'] * 100):.2f}%" if r['impressions'] > 0 else '0.00%', axis=1)
@@ -374,23 +352,24 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     df_with_total['sort_key'] = df_with_total.apply(custom_sort_key, axis=1)
     df_sorted = df_with_total.sort_values(by='sort_key', ascending=True).drop(columns=['sort_key'], errors='ignore')
 
-    # ★★★ categorize_performance 함수 (SyntaxError 최종 수정본 적용) ★★★
-    def categorize_performance(row):
-        # 합계 행은 제외
-        if row['광고명'] == '합계':
-            return ''
-        ad_id_current = row.get('ad_id')
-        cost = pd.to_numeric(row.get('구매당 비용', float('inf')), errors='coerce')
-        # NaN, Inf, 0 체크 (math.isinf 사용)
-        if pd.isna(cost) or math.isinf(cost) or cost == 0: # import math 필요
-            return ''
-        # 기준 금액 이상이면 '개선 필요!'
-        if cost >= 100000:
-            return '개선 필요!'
-        # 상위 ad_id 리스트(top_ad_ids)에 포함되는지 확인
-        if ad_id_current in top_ad_ids:
+    # --- ★★★ categorize_performance 함수 (SyntaxError 최종 수정본) ★★★ ---
+    # 아래 함수 정의 부분을 반드시 올바르게 적용해야 합니다.
+    df_non_total = df_sorted[df_sorted['광고명'] != '합계'].copy() # top_ad_ids 계산 위해 먼저 정의
+    df_valid_cost = df_non_total[pd.to_numeric(df_non_total['구매당 비용'], errors='coerce').fillna(float('inf')) > 0].copy()
+    top_ad_ids = []
+    if not df_valid_cost.empty and 'ad_id' in df_valid_cost.columns:
+        df_valid_cost['구매당 비용_num'] = pd.to_numeric(df_valid_cost['구매당 비용'])
+        df_rank_candidates = df_valid_cost[df_valid_cost['구매당 비용_num'] < 100000].sort_values(by='구매당 비용_num', ascending=True)
+        top_ad_ids = df_rank_candidates.head(3)['ad_id'].tolist()
+
+    def categorize_performance(row, top_ad_ids_list): # 파라미터 추가
+        if row['광고명'] == '합계': return ''
+        ad_id_current = row.get('ad_id'); cost = pd.to_numeric(row.get('구매당 비용', float('inf')), errors='coerce')
+        if pd.isna(cost) or math.isinf(cost) or cost == 0: return '' # math.isinf 추가
+        if cost >= 100000: return '개선 필요!'
+        if ad_id_current in top_ad_ids_list: # 파라미터 사용
             try:
-                rank = top_ad_ids.index(ad_id_current)
+                rank = top_ad_ids_list.index(ad_id_current)
                 # ★★★ 올바른 if/elif 구조 ★★★
                 if rank == 0:
                     return '위닝 콘텐츠'
@@ -398,13 +377,13 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                     return '고성과 콘텐츠'
                 elif rank == 2:
                     return '성과 콘텐츠'
-            except ValueError:
-                return ''
-        # 위 조건 모두 아니면 빈칸 반환
+            except ValueError: return ''
         return ''
-    # ★★★ categorize_performance 함수 적용 ★★★
-    if 'ad_id' in df_sorted.columns: df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1, args=(top_ad_ids,)) # args 전달
+    # ★★★ categorize_performance 함수 적용 (args 전달) ★★★
+    if 'ad_id' in df_sorted.columns: df_sorted['광고 성과'] = df_sorted.apply(categorize_performance, axis=1, args=(top_ad_ids,))
     else: df_sorted['광고 성과'] = ''
+    # --- categorize_performance 관련 수정 끝 ---
+
 
     # URL 재매핑 (creative_asset_url 포함)
     if 'ad_id' in df_sorted.columns:
@@ -415,8 +394,8 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
 
     # --- ★★★ HTML 테이블 생성 (creative_asset_url 링크 사용) ★★★ ---
     print("Generating HTML table...")
-    def format_currency(amount): try: return f"{int(float(amount)):,} ₩" except: return "0 ₩" # float 거치도록 수정
-    def format_number(num): try: return f"{int(float(num)):,}" except: return "0" # float 거치도록 수정
+    def format_currency(amount): try: return f"{int(float(amount)):,} ₩" except: return "0 ₩"
+    def format_number(num): try: return f"{int(float(num)):,}" except: return "0"
     display_columns = ['광고명', '캠페인명', '광고세트명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', '구매 수', '구매당 비용', 'Cafe24 방문자 수', 'Cafe24 매출', '광고 성과', '콘텐츠 유형', '광고 콘텐츠']
     # CSS 정의
     html_table = """<style> table {border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;} th, td {padding: 8px; border-bottom: 1px solid #ddd; text-align: right; white-space: nowrap; vertical-align: middle;} th {background-color: #f2f2f2; text-align: center; font-weight: bold;} td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; } td:nth-child(11), td:nth-child(12), td:nth-child(13), td:nth-child(14), td:nth-child(15) { text-align: center; } tr:hover {background-color: #f5f5f5;} .total-row {background-color: #e6f2ff; font-weight: bold;} .winning-content {color: #009900; font-weight: bold;} .medium-performance {color: #E69900; font-weight: bold;} .third-performance {color: #FF9900; font-weight: bold;} .needs-improvement {color: #FF0000; font-weight: bold;} a {text-decoration: none; color: inherit;} img.ad-content-thumbnail {max-width:100px; max-height:100px; vertical-align: middle; border: 1px solid #eee;} td.ad-content-cell { text-align: center; } </style><table><thead><tr>"""
@@ -435,8 +414,9 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                  if not is_total_row and col == 'Cafe24 방문자 수': value = '-'
                  else: value = format_number(row.get(col))
             elif col == 'CTR': value = row.get(col, '0.00%')
-            elif col == '광고 성과': # 최종 수정된 categorize_performance 결과 사용
+            elif col == '광고 성과':
                 performance_text = row.get(col, ''); performance_class = '';
+                # ★★★ 수정된 categorize_performance 함수 결과 사용 ★★★
                 if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'
                 elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'
                 elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'
@@ -446,7 +426,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 td_align = 'center'; td_class.append('text-center')
             elif col == '콘텐츠 유형': value = row.get(col, '기타') if not is_total_row else ''; td_align = 'center'; td_class.append('text-center')
             elif col == '광고 콘텐츠':
-                # ★★★ 링크를 creative_asset_url 로 수정하여 사용 ★★★
+                # ★★★ 링크를 creative_asset_url 로 사용 ★★★
                 display_url = row.get('display_url', '')
                 creative_asset_url = row.get('creative_asset_url', '') # 소재 자체 링크 사용
                 content_tag = ""
