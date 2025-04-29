@@ -9,31 +9,25 @@
 <body>
   <div class="container">
     <h1>Facebook 광고 성과 보고서</h1>
-
-    <div class="form-group">
-      <label for="start-date">시작 날짜:</label>
-      <input type="date" id="start-date">
-    </div>
-
-    <div class="form-group">
-      <label for="end-date">종료 날짜:</label>
-      <input type="date" id="end-date">
-    </div>
-
-    <div class="form-group">
-      <label for="report-password">패스워드:</label>
-      <input type="password" id="report-password" placeholder="패스워드를 입력하세요.">
-    </div>
-
-    <div class="form-group" id="account-selector-container" style="margin-top: 10px; margin-bottom: 15px;">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="start-date">시작 날짜:</label>
+        <input type="date" id="start-date">
       </div>
-
-    <button onclick="generateReport()">보고서 생성</button>
-
+      <div class="form-group">
+        <label for="end-date">종료 날짜:</label>
+        <input type="date" id="end-date">
+      </div>
+      <div class="form-group">
+        <label for="report-password">패스워드:</label>
+        <input type="password" id="report-password" placeholder="패스워드를 입력하세요.">
+      </div>
+      <div class="form-group" id="account-selector-container" style="min-width:180px"></div>
+      <button class="generate-btn" onclick="generateReport()">보고서 생성</button>
+    </div>
     <div id="error-message" style="margin-top: 15px; color: red;"></div>
     <div id="report-result" style="margin-top: 20px;"></div>
   </div>
-
   <script src="script.js"></script>
 </body>
 </html>
