@@ -259,19 +259,23 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             print(f"페이지 데이터 불러오기 중 네트워크 오류 발생 (Page: {page_count}, URL: {current_url.split('access_token=')[0]}...): {req_err}")
             print(f"현재까지 수집된 데이터로 보고서를 생성합니다.")
             break
+
         data = response.json()
         records_on_page = data.get('data', [])
         if not records_on_page:
             if page_count == 1: print("첫 페이지에서 데이터를 찾을 수 없습니다.")
             else: print(f"페이지 {page_count}에서 더 이상 데이터가 없습니다. 중단합니다.")
             break
+
         all_records.extend(records_on_page)
         print(f"Fetched {len(records_on_page)} records from page {page_count}. Total records: {len(all_records)}")
+
         paging = data.get('paging', {})
         insights_url = paging.get('next')
         page_count += 1
         if page_count > 1:
             params = None
+
     print(f"Finished fetching all pages. Total {len(all_records)} records found.")
 
     if not all_records:
@@ -315,6 +319,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         ad_data[ad_id]['adset_name'] = record.get('adset_name') or ad_data[ad_id]['adset_name']
 
     fetch_creatives_parallel(ad_data, ver, token, max_workers=10)
+
     result_list = list(ad_data.values())
     if not result_list:
         print("데이터 집계 후 처리할 레코드가 없습니다.")
@@ -337,11 +342,10 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         else:
             df[col] = 0
 
-    # 지표 계산 (수치형)
-    df['CTR'] = df.apply(lambda r: (r['link_clicks'] / r['impressions'] * 100) if r['impressions'] > 0 else 0, axis=1)
-    df['CPC'] = df.apply(lambda r: (r['spend'] / r['link_clicks']) if r['link_clicks'] > 0 else 0, axis=1)
-    df['CVR'] = df.apply(lambda r: (r['purchase_count'] / r['link_clicks'] * 100) if r['link_clicks'] > 0 else 0, axis=1)
-    df['구매당 비용'] = df.apply(lambda r: (r['spend'] / r['purchase_count']) if r['purchase_count'] > 0 else 0, axis=1)
+    df['CTR'] = df.apply(lambda r: f"{round((r['link_clicks'] / r['impressions'] * 100), 2)}%" if r['impressions'] > 0 else "0%", axis=1)
+    df['CPC'] = df.apply(lambda r: round(r['spend'] / r['link_clicks']) if r['link_clicks'] > 0 else 0, axis=1).astype(int)
+    df['CVR'] = df.apply(lambda r: f"{round((r['purchase_count'] / r['link_clicks'] * 100), 2)}%" if r['link_clicks'] > 0 else "0%", axis=1)
+    df['구매당 비용'] = df.apply(lambda r: round(r['spend'] / r['purchase_count']) if r['purchase_count'] > 0 else 0, axis=1).astype(int)
 
     df = df.rename(columns={
         'ad_name': '광고명', 'campaign_name': '캠페인명', 'adset_name': '광고세트명',
@@ -355,7 +359,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     ]
     df = df[[col for col in column_order if col in df.columns]]
 
-    # 합계 row: 광고비/노출/클릭/구매수는 sum, CTR/CPC/구매당비용/CVR은 평균
+    # 합계 행
     total_row = {
         '광고명': '합계',
         '캠페인명': '',
@@ -363,20 +367,32 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'FB 광고비용': df['FB 광고비용'].sum(),
         '노출': df['노출'].sum(),
         'Click': df['Click'].sum(),
-        'CTR': round(df['CTR'].mean(), 2),
-        'CPC': round(df['CPC'].mean(), 2),
-        'CVR': round(df['CVR'].mean(), 2),
+        'CTR': '', 'CPC': '', 'CVR': '',
         '구매 수': df['구매 수'].sum(),
-        '구매당 비용': round(df['구매당 비용'].mean(), 2),
+        '구매당 비용': '',
         '광고 성과': '',
         '콘텐츠 유형': '',
         'display_url': '',
         'target_url': ''
     }
 
+    # 평균 행
+    avg_ctr = f"{round(df['Click'].sum()/df['노출'].sum()*100,2)}%" if df['노출'].sum() > 0 else "0%"
+    avg_cpc = f"{int(df['FB 광고비용'].sum()/df['Click'].sum())} ₩" if df['Click'].sum() > 0 else "0 ₩"
+    avg_cpp = f"{int(df['FB 광고비용'].sum()/df['구매 수'].sum())} ₩" if df['구매 수'].sum() > 0 else "0 ₩"
+    avg_row = {
+        '광고명': '평균',
+        '캠페인명': '', '광고세트명': '', 'FB 광고비용': '', '노출': '', 'Click': '',
+        'CTR': avg_ctr, 'CPC': avg_cpc, 'CVR': '',
+        '구매 수': '', '구매당 비용': avg_cpp,
+        '광고 성과': '', '콘텐츠 유형': '', 'display_url': '', 'target_url': ''
+    }
+
+    df_with_total = pd.concat([pd.DataFrame([total_row, avg_row]), df], ignore_index=True)
+
     # 광고 성과 라벨링
     def categorize_performance(row, top_indices):
-        if row['광고명'] == '합계': return ''
+        if row['광고명'] == '합계' or row['광고명'] == '평균': return ''
         try:
             cost = float(row['구매당 비용'])
             if math.isnan(cost) or math.isinf(cost) or cost == 0: return ''
@@ -390,7 +406,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         except (ValueError, TypeError):
             return ''
 
-    df_non_total = df[df['광고명'] != '합계'].copy()
+    df_non_total = df_with_total[(df_with_total['광고명'] != '합계') & (df_with_total['광고명'] != '평균')].copy()
     df_valid_cost = df_non_total[pd.to_numeric(df_non_total['구매당 비용'], errors='coerce').fillna(0) > 0].copy()
     if not df_valid_cost.empty:
         df_valid_cost['구매당 비용_num'] = pd.to_numeric(df_valid_cost['구매당 비용'])
@@ -398,29 +414,23 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         top_indices = df_rank_candidates.head(3).index.tolist()
     else:
         top_indices = []
-    df['광고 성과'] = df.apply(lambda row: categorize_performance(row, top_indices), axis=1)
 
-    # 광고 성과 우선순위 정렬
-    perf_rank = {'위닝 콘텐츠': 1, '고성과 콘텐츠': 2, '성과 콘텐츠': 3, '개선 필요!': 4, '': 5}
-    df['sort_key'] = df['광고 성과'].map(lambda x: perf_rank.get(x, 99))
-    df = df.sort_values(by='sort_key').drop(columns=['sort_key'])
+    df_with_total['광고 성과'] = df_with_total.apply(lambda row: categorize_performance(row, top_indices), axis=1)
 
-    # 합계 행 추가
-    df_with_total = pd.concat([pd.DataFrame([total_row]), df], ignore_index=True)
-
-    # HTML 테이블 생성
-    def format_currency(amount): return f"{int(amount):,} ₩" if isinstance(amount, (int, float)) and not (math.isnan(amount) or math.isinf(amount)) else str(amount)
-    def format_number(num): return f"{int(num):,}" if isinstance(num, (int, float)) and not (math.isnan(num) or math.isinf(num)) else str(num)
+    def format_currency(amount): return f"{int(amount):,} ₩" if pd.notna(amount) and isinstance(amount, (int, float)) and not (math.isnan(amount) or math.isinf(amount)) else "0 ₩"
+    def format_number(num): return f"{int(num):,}" if pd.notna(num) and isinstance(num, (int, float)) and not (math.isnan(num) or math.isinf(num)) else "0"
 
     html_table = """
     <style>
     table {border-collapse: collapse; width: 100%;}
     th, td {padding: 8px; border-bottom: 1px solid #ddd;}
-    th {background-color: #f2f2f2; text-align: center; white-space: pre-line; vertical-align: middle; position: sticky; top: 0; z-index: 2;}
-    td {text-align: right; white-space: pre-line; vertical-align: middle; overflow-wrap: break-word; word-break: break-all;}
-    td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; min-width: 100px; max-width: 180px; }
+    th {background-color: #f2f2f2; text-align: center; white-space: nowrap; vertical-align: middle;}
+    td {text-align: right; white-space: nowrap; vertical-align: middle;}
+    td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; }
+    td:nth-child(11), td:nth-child(12) { text-align: center; }
     tr:hover {background-color: #f5f5f5;}
     .total-row {background-color: #e6f2ff; font-weight: bold;}
+    .avg-row {background-color: #f9f9d1; font-weight: bold;}
     .winning-content {color: #009900; font-weight: bold;}
     .medium-performance {color: #E69900; font-weight: bold;}
     .third-performance {color: #FF9900; font-weight: bold;}
@@ -428,6 +438,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     a {text-decoration: none; color: inherit;}
     img.ad-content-thumbnail {max-width:100px; max-height:100px; vertical-align: middle;}
     td.ad-content-cell { text-align: center; }
+    .sort-icon { font-size: 0.8em; margin-left: 4px; cursor: pointer; }
     </style>
     <table>
       <tr>
@@ -447,21 +458,26 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         <th>광고 콘텐츠 <span class="sort-icon"></span></th>
       </tr>
     """
+    # HTML 행 생성
     for idx, row in df_with_total.iterrows():
-        row_class = 'total-row' if row['광고명'] == '합계' else ''
+        row_class = ''
+        if row['광고명'] == '합계': row_class = 'total-row'
+        if row['광고명'] == '평균': row_class = 'avg-row'
         performance_text = row.get('광고 성과', '')
         performance_class = ''
         if performance_text == '위닝 콘텐츠': performance_class = 'winning-content'
         elif performance_text == '고성과 콘텐츠': performance_class = 'medium-performance'
         elif performance_text == '성과 콘텐츠': performance_class = 'third-performance'
         elif performance_text == '개선 필요!': performance_class = 'needs-improvement'
+
         display_url = row.get('display_url', '')
         target_url = row.get('target_url', '')
         content_tag = ""
         if display_url:
             img_tag = f'<img src="{display_url}" class="ad-content-thumbnail" alt="광고 콘텐츠">'
             content_tag = f'<a href="{target_url}" target="_blank">{img_tag}</a>' if isinstance(target_url, str) and target_url.startswith('http') else img_tag
-        elif row['광고명'] != '합계': content_tag = "-"
+        elif row['광고명'] not in ['합계', '평균']: content_tag = "-"
+
         html_table += f"""
         <tr class="{row_class}">
           <td>{row.get('광고명','')}</td>
@@ -470,9 +486,9 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
           <td>{format_currency(row.get('FB 광고비용',0))}</td>
           <td>{format_number(row.get('노출',0))}</td>
           <td>{format_number(row.get('Click',0))}</td>
-          <td>{row.get('CTR','0')}</td>
+          <td>{row.get('CTR','0%')}</td>
           <td>{format_currency(row.get('CPC',0))}</td>
-          <td>{row.get('CVR','0')}</td>
+          <td>{row.get('CVR','0%')}</td>
           <td>{format_number(row.get('구매 수',0))}</td>
           <td>{format_currency(row.get('구매당 비용',0))}</td>
           <td class="{performance_class}">{performance_text}</td>
@@ -482,6 +498,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         """
     html_table += "</table>"
 
+    # JSON 반환
     df_for_json = df_with_total.drop(columns=['display_url', 'target_url'], errors='ignore')
     def clean_numeric(data):
         if isinstance(data, dict): return {k: clean_numeric(v) for k, v in data.items()}
@@ -495,8 +512,10 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
             except: pass
             return str(data)
         return data
+
     records = df_for_json.to_dict(orient='records')
     cleaned_records = clean_numeric(records)
+
     return {"html_table": html_table, "data": cleaned_records}
 
 # Flask 앱 실행 (로컬 테스트 시 주석 해제)
