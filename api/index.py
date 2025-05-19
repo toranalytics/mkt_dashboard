@@ -260,7 +260,7 @@ def get_video_source_url(video_id, ver, token):
         print(f"Notice: Could not fetch video source for video {video_id}. Error: {e}")
         return None
 
-def fetch_creatives_parallel(ad_ids_with_spend, ver, token, max_workers=10):
+def fetch_creatives_parallel(ad_ids_with_spend, ver, token, max_workers=5):
     creatives_data = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(get_creative_details, ad_id, ver, token): ad_id for ad_id in ad_ids_with_spend}
