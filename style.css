@@ -7,7 +7,7 @@ body {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1600px; /* << 이 부분을 수정했습니다. */
   margin: 40px auto;
   background: #fff;
   border-radius: 12px;
