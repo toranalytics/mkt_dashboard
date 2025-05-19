@@ -311,7 +311,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'time_range[since]': start_date,
         'time_range[until]': end_date,
         'use_unified_attribution_setting': 'true', # 권장 설정
-        'limit': 20 # 페이지당 요청 레코드 수를 약간 늘려 API 호출 횟수 줄이기 시도 (최대 500 또는 1000, 테스트 필요)
+        'limit': 250 # 페이지당 요청 레코드 수를 약간 늘려 API 호출 횟수 줄이기 시도 (최대 500 또는 1000, 테스트 필요)
     }
 
     s_time_insights = time.time()
