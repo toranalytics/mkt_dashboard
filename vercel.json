@@ -5,8 +5,7 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
-        "runtime": "python3.9",
-        "maxDuration": 60 // 초 단위, 최대값은 플랜에 따라 다름
+        "runtime": "python3.9"
       }
     },
     {
