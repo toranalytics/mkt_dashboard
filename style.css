@@ -4,52 +4,58 @@ body {
   font-family: 'Noto Sans KR', Arial, sans-serif;
   background: #f7f9fa;
   color: #222;
+  font-size: 14px; /* 모바일 기본 폰트 크기 */
 }
 
 .container {
-  max-width: 1600px; /* << 이 부분을 수정했습니다. */
-  margin: 40px auto;
+  width: 90%; /* 모바일에서는 화면 너비의 90% 사용 */
+  max-width: 100%; /* 모바일에서 최대 너비 제한 없음 (width로 제어) */
+  margin: 20px auto; /* 모바일 상하 마진 축소 */
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.07);
-  padding: 32px 40px 40px 40px;
+  border-radius: 8px; /* 모바일에서는 약간 작은 radius */
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  padding: 20px; /* 모바일 내부 패딩 축소 */
 }
 
 h1 {
-  font-size: 2.2rem;
+  font-size: 1.8rem; /* 모바일용 H1 크기 */
   font-weight: 700;
-  margin-bottom: 32px;
-  letter-spacing: -1px;
+  margin-bottom: 24px;
+  letter-spacing: -0.5px;
 }
 
 form#reportForm {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .form-row {
   display: flex;
-  align-items: center;
-  margin-bottom: 16px;
-  gap: 16px;
+  flex-direction: column; /* 모바일에서는 세로 정렬 */
+  align-items: stretch; /* 내부 요소들 너비 꽉 채우기 */
+  margin-bottom: 12px;
+  gap: 8px; /* 모바일에서는 간격 축소 */
 }
 
 .form-row label {
-  min-width: 90px;
+  min-width: auto; /* 모바일에서는 최소 너비 해제 */
   font-weight: 500;
+  margin-bottom: 4px; /* 레이블과 입력 필드 사이 간격 */
 }
 
 .form-row input[type="date"],
 .form-row input[type="password"],
 .form-row select {
-  padding: 8px 12px;
+  padding: 10px 12px; /* 터치 편의성을 위해 패딩 약간 늘림 */
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 1rem;
+  width: 100%; /* 모바일에서 너비 100% */
+  box-sizing: border-box; /* 패딩, 테두리 포함한 너비 계산 */
 }
 
 #generateBtn {
-  margin-top: 8px;
-  padding: 10px 32px;
+  margin-top: 16px;
+  padding: 12px 20px; /* 모바일용 버튼 패딩 */
   background: #3b5998;
   color: #fff;
   font-weight: 700;
@@ -58,6 +64,8 @@ form#reportForm {
   font-size: 1.1rem;
   cursor: pointer;
   transition: background 0.2s;
+  width: 100%; /* 모바일에서 버튼 너비 100% */
+  box-sizing: border-box;
 }
 
 #generateBtn:hover {
@@ -65,15 +73,15 @@ form#reportForm {
 }
 
 #loading {
-  font-size: 1.15rem;
+  font-size: 1.1rem; /* 모바일용 로딩 텍스트 크기 */
   color: #3b5998;
-  margin: 18px 0;
+  margin: 16px 0;
   text-align: center;
 }
 
 #result {
-  margin-top: 30px;
-  overflow-x: auto;
+  margin-top: 24px;
+  overflow-x: auto; /* 테이블이 넓을 경우 가로 스크롤 항상 유지 */
 }
 
 table {
@@ -81,27 +89,34 @@ table {
   width: 100%;
   background: #fff;
   margin-top: 16px;
+  font-size: 0.9rem; /* 모바일 테이블 폰트 크기 */
 }
 
 th, td {
-  padding: 10px 8px;
+  padding: 8px 6px; /* 모바일 테이블 셀 패딩 */
   border-bottom: 1px solid #eaeaea;
-  font-size: 1rem;
   vertical-align: middle;
+  white-space: normal; /* 모바일에서는 텍스트 줄바꿈 허용 */
+  text-align: left; /* 모바일에서는 기본 왼쪽 정렬, 필요시 아래에서 재정의 */
 }
 
 th {
   background: #f2f6fa;
   font-weight: 700;
-  text-align: center;
-  white-space: nowrap;
+  text-align: center; /* 헤더는 중앙 정렬 유지 */
+  white-space: nowrap; /* 헤더는 PC와 동일하게 유지할 수도 있음, 또는 normal */
 }
 
 td {
-  text-align: right;
-  white-space: nowrap;
+  /* 기본 왼쪽 정렬, 특정 셀만 오른쪽/중앙 정렬 필요시 아래 media query에서 처리 */
 }
 
+/* 숫자나 통화 관련 컬럼은 오른쪽 정렬 유지 */
+td:nth-child(4), td:nth-child(5), td:nth-child(6), td:nth-child(7), td:nth-child(8), td:nth-child(9), td:nth-child(10), td:nth-child(11) {
+  text-align: right;
+}
+
+/* 캠페인명, 광고세트명, 소재명은 왼쪽 정렬 유지 */
 td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; }
 
 tr:hover { background: #f7f7f7; }
@@ -113,11 +128,94 @@ tr:hover { background: #f7f7f7; }
 .needs-improvement { color: #FF0000; font-weight: bold; }
 
 a { text-decoration: none; color: inherit; }
+
 img.ad-content-thumbnail {
-  max-width: 90px;
-  max-height: 90px;
-  border-radius: 6px;
+  max-width: 70px; /* 모바일용 썸네일 크기 */
+  max-height: 70px;
+  border-radius: 4px;
   vertical-align: middle;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.07);
 }
-td.ad-content-cell { text-align: center; }
+td.ad-content-cell {
+  text-align: center;
+  min-width: 80px; /* 썸네일이 너무 찌그러지지 않도록 최소 너비 */
+}
+
+/* Tablet and Desktop styles */
+@media (min-width: 768px) {
+  body {
+    font-size: 16px; /* PC 기본 폰트 크기 */
+  }
+
+  .container {
+    width: auto; /* PC에서는 width 자동 (max-width로 제어) */
+    max-width: 1600px; /* PC 최대 너비 */
+    margin: 40px auto;
+    border-radius: 12px;
+    padding: 32px 40px 40px 40px;
+  }
+
+  h1 {
+    font-size: 2.2rem; /* PC용 H1 크기 */
+    margin-bottom: 32px;
+    letter-spacing: -1px;
+  }
+
+  form#reportForm {
+    margin-bottom: 32px;
+  }
+
+  .form-row {
+    flex-direction: row; /* PC에서는 가로 정렬 */
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 16px;
+  }
+
+  .form-row label {
+    min-width: 90px;
+    margin-bottom: 0; /* PC에서는 불필요 */
+  }
+
+  .form-row input[type="date"],
+  .form-row input[type="password"],
+  .form-row select {
+    padding: 8px 12px;
+    font-size: 1rem;
+    width: auto; /* PC에서는 너비 자동 */
+  }
+
+  #generateBtn {
+    margin-top: 8px;
+    padding: 10px 32px;
+    font-size: 1.1rem;
+    width: auto; /* PC에서는 버튼 너비 자동 */
+  }
+
+  table {
+    font-size: 1rem; /* PC 테이블 폰트 크기 */
+    margin-top: 16px;
+  }
+
+  th, td {
+    padding: 10px 8px; /* PC 테이블 셀 패딩 */
+    white-space: nowrap; /* PC에서는 기본적으로 줄바꿈 없음 */
+  }
+  
+  /* PC에서 특정 컬럼만 줄바꿈 허용하고 싶다면 개별적으로 white-space: normal; 추가 */
+  /* 예: td:nth-child(3) { white-space: normal; } 소재명이 길 경우 */
+
+  /* PC 테이블 셀 정렬 (기존 스타일 유지) */
+  td:nth-child(1), td:nth-child(2), td:nth-child(3) { text-align: left; }
+  td:nth-child(12), td:nth-child(13) { text-align: center; } /* 광고 성과, 콘텐츠 유형 */
+
+
+  img.ad-content-thumbnail {
+    max-width: 90px;
+    max-height: 90px;
+    border-radius: 6px;
+  }
+  td.ad-content-cell {
+    min-width: 100px;
+  }
+}
