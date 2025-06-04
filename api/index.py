@@ -355,7 +355,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     ad_data = {}
     ad_ids_with_spend = set() # 지출이 있는 광고 ID만 수집 (크리에이티브 요청 대상)
 
-        for record in all_records: # <--- 이 루프 내부입니다.
+    for record in all_records: # <--- 이 루프 내부입니다.
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
