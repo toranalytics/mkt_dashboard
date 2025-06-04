@@ -302,7 +302,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     # 현재는 'purchase'만 사용하므로, 'actions.action_type(purchase)' 와 같이 필터링 가능 여부 확인 필요
     # (FB API 문서 참조: filtering on subfields)
     # 일단 현재 구조 유지하되, action 처리 부분에서 필요한 action만 추출하도록 함.
-    metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions' #
+    metrics = 'ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks,ctr,cpc,actions,action_values' # purchase_roas도 고려
     insights_url = f"https://graph.facebook.com/{ver}/{account}/insights"
     params = {
         'fields': metrics,
@@ -311,7 +311,7 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
         'time_range[since]': start_date,
         'time_range[until]': end_date,
         'use_unified_attribution_setting': 'true', # 권장 설정
-        'limit': 250 # 페이지당 요청 레코드 수를 약간 늘려 API 호출 횟수 줄이기 시도 (최대 500 또는 1000, 테스트 필요)
+        'limit': 500 # 페이지당 요청 레코드 수를 약간 늘려 API 호출 횟수 줄이기 시도 (최대 500 또는 1000, 테스트 필요)
     }
 
     s_time_insights = time.time()
@@ -355,16 +355,16 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     ad_data = {}
     ad_ids_with_spend = set() # 지출이 있는 광고 ID만 수집 (크리에이티브 요청 대상)
 
-    for record in all_records:
+        for record in all_records: # <--- 이 루프 내부입니다.
         ad_id = record.get('ad_id')
         if not ad_id:
             continue
 
         spend = float(record.get('spend', 0) or 0)
-        if spend == 0: # 광고비용(Spend)이 0이면 크리에이티브 요청/집계 모두 제외
-            continue
+        # if spend == 0: # 광고비용(Spend)이 0이면 크리에이티브 요청/집계 모두 제외 -> ROAS 계산 시 수익만 있고 지출이 0인 경우도 있으므로, 이 조건은 ROAS 계산 후 필터링하거나 유지. 일단 주석 처리 또는 유지 고려.
+        #     continue
         
-        ad_ids_with_spend.add(ad_id)
+        ad_ids_with_spend.add(ad_id) # 지출이 없더라도 ROAS 계산을 위해 ad_id는 추가될 수 있음 (수익이 있는 경우)
 
         if ad_id not in ad_data:
             ad_data[ad_id] = {
@@ -374,27 +374,42 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 'adset_name': record.get('adset_name'),
                 'spend': 0.0,
                 'impressions': 0,
-                'link_clicks': 0, # 'clicks' 필드는 다양한 유형의 클릭을 포함할 수 있음. 'link_clicks'가 더 정확할 수 있으나 API에서 해당 필드를 지원하는지 확인 필요. 현재는 'clicks' 사용.
+                'link_clicks': 0, 
                 'purchase_count': 0,
+                'purchase_value': 0.0 # 여기에 'purchase_value' 초기화 추가!
             }
 
         ad_data[ad_id]['spend'] += spend
         try: ad_data[ad_id]['impressions'] += int(record.get('impressions', 0))
         except (ValueError, TypeError): pass
-        try: ad_data[ad_id]['link_clicks'] += int(record.get('clicks', 0)) # API에서 'clicks'가 어떤 클릭을 의미하는지 명확히 할 필요 (예: link_click, outbound_click 등)
+        try: ad_data[ad_id]['link_clicks'] += int(record.get('clicks', 0)) 
         except (ValueError, TypeError): pass
         
-        # 'actions' 필드에서 'purchase' 값 집계
         purchase_on_record = 0
         actions = record.get('actions')
         if actions and isinstance(actions, list):
             for action in actions:
-                if action.get("action_type") == "purchase": #
-                    try: purchase_on_record += int(action.get("value", 0)) # 'value'는 구매 건수일 수도 있고, 구매 금액일 수도 있음. API 응답 확인 필요. 여기서는 건수로 가정.
+                if action.get("action_type") == "purchase": 
+                    try: purchase_on_record += int(action.get("value", 0)) 
                     except (ValueError, TypeError): pass
         ad_data[ad_id]['purchase_count'] += purchase_on_record
         
-        # 이름 필드는 최신 레코드로 덮어쓰거나, 최초 발견된 이름을 유지할 수 있음. 현재는 덮어쓰기.
+        # ▼▼▼▼▼ 여기에 수익 집계 로직 추가 ▼▼▼▼▼
+        current_purchase_value = 0.0 # float으로 초기화
+        action_values = record.get('action_values') # API 요청 시 'action_values'가 metrics에 포함되어야 함
+        if action_values and isinstance(action_values, list):
+            for av in action_values:
+                # 실제 수익을 나타내는 action_type은 Facebook API 설정 및 이벤트 구성에 따라 다를 수 있습니다.
+                # 일반적인 예시: 'omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase' 등
+                # 사용하고 계신 정확한 action_type으로 수정해야 합니다.
+                if av.get('action_type') in ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase', 'app_custom_event.fb_mobile_purchase']: 
+                    try:
+                        current_purchase_value += float(av.get('value', 0))
+                    except (ValueError, TypeError):
+                        pass
+        ad_data[ad_id]['purchase_value'] += current_purchase_value
+        # ▲▲▲▲▲ 수익 집계 로직 추가 완료 ▲▲▲▲▲
+        
         ad_data[ad_id]['ad_name'] = record.get('ad_name') or ad_data[ad_id]['ad_name']
         ad_data[ad_id]['campaign_name'] = record.get('campaign_name') or ad_data[ad_id]['campaign_name']
         ad_data[ad_id]['adset_name'] = record.get('adset_name') or ad_data[ad_id]['adset_name']
@@ -441,6 +456,22 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         else:
             df[col] = 0 # 컬럼이 없는 경우 0으로 채움
+    
+    # ▼▼▼▼▼ 여기에 purchase_value 처리 및 ROAS 계산 로직 추가 ▼▼▼▼▼
+    if 'purchase_value' not in df.columns: # ad_data 초기화 시 추가했으므로 이 컬럼은 존재해야 함
+        df['purchase_value'] = 0.0         # 만약의 경우를 대비한 방어 코드
+    else:
+        # 이미 ad_data에서 float으로 집계되었으므로, pd.to_numeric은 불필요할 수 있으나 안전하게 처리
+        df['purchase_value'] = pd.to_numeric(df['purchase_value'], errors='coerce').fillna(0.0)
+
+    df['ROAS_val'] = 0.0  # ROAS 계산을 위한 숫자형 컬럼 (내부 계산용)
+    # FB 광고비용 컬럼명은 df.rename 이후 'FB 광고비용'이 되므로, rename 전에 원본 컬럼명('spend')을 사용하거나,
+    # rename 이후에 이 로직을 위치시킨다면 'FB 광고비용'을 사용해야 합니다.
+    # 현재 위치에서는 'spend' 컬럼이 아직 존재할 가능성이 높습니다. df.rename 이후라면 'FB 광고비용' 사용.
+    # df.rename 전에 위치한다고 가정하고 'spend' 사용.
+    df.loc[df['spend'] > 0, 'ROAS_val'] = (df['purchase_value'] / df['spend']) * 100
+    df['ROAS'] = df['ROAS_val'].round(2).astype(str) + '%' # 화면 표시용 ROAS (문자열)
+    # ▲▲▲▲▲ purchase_value 처리 및 ROAS 계산 로직 추가 완료 ▲▲▲▲▲
 
     # 계산 필드 추가 (벡터화 연산으로 변경 시도)
     df['CTR_val'] = 0.0
@@ -464,9 +495,9 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     df = df.rename(columns={
         'ad_name': '소재명', 'campaign_name': '캠페인명', 'adset_name': '광고세트명',
         'spend': 'FB 광고비용', 'impressions': '노출', 'link_clicks': 'Click',
-        'purchase_count': '구매 수'
+        'purchase_count': '구매 수',
+        # 'purchase_value': '총 구매액' # 필요하다면 이 컬럼도 rename 하여 유지 가능
     })
-
     column_order = [
         '캠페인명', '광고세트명', '소재명', 'FB 광고비용', '노출', 'Click', 'CTR', 'CPC', 'CVR',
         '구매 수', '구매당 비용', 'ad_id', '광고 성과', '콘텐츠 유형', 'display_url', 'target_url'
@@ -573,7 +604,29 @@ def fetch_and_format_facebook_ads_data(start_date, end_date, ver, account, token
     e_time_df_aggregation_sort = time.time()
     print(f"[Performance] DataFrame aggregation, sorting, and performance categorization took {e_time_df_aggregation_sort - s_time_df_aggregation_sort:.2f} seconds.")
 
+    # ▼▼▼▼▼ ROAS 기준 정렬, 상위 30개 필터링 및 최종 데이터셋 구성 ▼▼▼▼▼
+    # (전체 df에 대해 '광고 성과'가 이미 계산되었다고 가정)
 
+    # ROAS_val 컬럼이 df에 있는지 확인 (없다면 이전 단계에서 생성되어야 함)
+    if 'ROAS_val' not in df.columns:
+        # 이 경우는 이전 단계에서 ROAS_val이 제대로 생성되지 않았음을 의미. 오류 처리 또는 재생성 로직 필요.
+        # 간단히 0으로 채우거나, 에러를 발생시킬 수 있습니다.
+        # 여기서는 이전 단계에서 반드시 생성되었다고 가정합니다.
+        print("Warning: ROAS_val column not found in DataFrame before sorting by ROAS.")
+        df['ROAS_val'] = 0.0 # 임시 방편
+
+    # '소재명'이 '합계'인 행(totals_row)은 정렬 및 필터링 대상에서 제외하고 나중에 합칩니다.
+    # df_data_only = df.copy() # 만약 df가 이미 totals_row를 제외한 순수 데이터라면 그대로 사용
+
+    df_sorted_roas_all = df.sort_values(by='ROAS_val', ascending=False)
+    df_top30_roas = df_sorted_roas_all.head(30)
+
+    # 합계행은 전체 데이터 기준 totals_row 사용 (이전에 계산된 totals_row Series 사용)
+    df_final_for_frontend = pd.concat([pd.DataFrame([totals_row]), df_top30_roas], ignore_index=True)
+
+    # iter_df를 df_final_for_frontend로 설정하여 HTML 렌더링에 사용
+    iter_df = df_final_for_frontend
+    # ▲▲▲▲▲ ROAS 필터링 및 최종 데이터셋 구성 완료 ▲▲▲▲▲
     s_time_html_render = time.time()
     # HTML 테이블 생성
     def format_currency(amount): return f"{int(amount):,} ₩" if pd.notna(amount) and isinstance(amount, (int, float)) and not (math.isnan(amount) or math.isinf(amount)) else "0 ₩"
